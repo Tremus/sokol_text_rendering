@@ -1,0 +1,9 @@
+[submodule "modules/xhl"]
+	path = modules/xhl
+	url = https://github.com/Tremus/xhl
+[submodule "modules/CPLUG"]
+	path = modules/CPLUG
+	url = https://github.com/Tremus/CPLUG
+[submodule "modules/sokol_gfx_multiinstance"]
+	path = modules/sokol_gfx_multiinstance
+	url = https://github.com/Tremus/sokol_gfx_multiinstance

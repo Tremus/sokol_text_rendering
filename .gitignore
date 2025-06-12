@@ -1,0 +1,8 @@
+.cache
+.clangd
+.DS_Store
+.ideas
+.vscode
+build
+dist
+src/shaders/*.h
