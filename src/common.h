@@ -75,6 +75,9 @@ void println(const char* const fmt, ...);
 #define XFILES_MALLOC(sz) MY_MALLOC(sz)
 #define XFILES_FREE(ptr)  MY_FREE(ptr)
 
+#define XARR_REALLOC(ptr, sz) MY_REALLOC(ptr, sz)
+#define XARR_FREE(ptr)        MY_FREE(ptr)
+
 enum
 {
     GUI_INIT_WIDTH  = 960,

@@ -1,0 +1,1 @@
+sokol-shdc -i src\shaders\text.glsl -o src\shaders\text.glsl.h -l hlsl5

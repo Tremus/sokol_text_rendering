@@ -7,3 +7,9 @@
 [submodule "modules/sokol_gfx_multiinstance"]
 	path = modules/sokol_gfx_multiinstance
 	url = https://github.com/Tremus/sokol_gfx_multiinstance
+[submodule "modules/freetype"]
+	path = modules/freetype
+	url = https://github.com/freetype/freetype
+[submodule "modules/harfbuzz"]
+	path = modules/harfbuzz
+	url = https://github.com/harfbuzz/harfbuzz

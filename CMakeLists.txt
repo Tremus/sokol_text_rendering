@@ -5,7 +5,9 @@ set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "" FORCE)
 project(text
     VERSION 0.0.1
     DESCRIPTION ""
-    LANGUAGES C)
+    LANGUAGES C CXX)
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_CXX_STANDARD 11)
 set(COMPANY_NAME "exacoustics")
 
 set(PRODUCT_NAME "${PROJECT_NAME}")
@@ -119,6 +121,8 @@ set(PLUGIN_INCLUDE
     modules/xhl/include
     modules/CPLUG/src/
     modules/sokol_gfx_multiinstance/
+    modules/harfbuzz/src
+    modules/freetype/include
 
     src/libs
     src/shaders/
@@ -162,6 +166,96 @@ elseif(APPLE)
         "-framework MetalKit")
     list(APPEND PLUGIN_DEFINITIONS PW_METAL)
 endif()
+
+
+set(FREETYPE_SRC
+    # modules/freetype/src/bzip2/ftbzip2.c
+    modules/freetype/src/base/ftbdf.c
+    modules/freetype/src/base/ftbbox.c
+    modules/freetype/src/base/ftpatent.c
+    modules/freetype/src/base/ftcid.c
+    modules/freetype/src/base/ftwinfnt.c
+    modules/freetype/src/base/ftsynth.c
+    modules/freetype/src/base/ftmm.c
+    modules/freetype/src/base/ftstroke.c
+    modules/freetype/src/base/ftpfr.c
+    modules/freetype/src/base/ftfstype.c
+    modules/freetype/src/base/ftotval.c
+    modules/freetype/src/base/fttype1.c
+    modules/freetype/src/base/ftinit.c
+    modules/freetype/src/base/ftgxval.c
+    modules/freetype/src/base/ftgasp.c
+    modules/freetype/src/base/ftglyph.c
+    modules/freetype/src/base/ftbitmap.c
+    modules/freetype/src/bdf/bdf.c
+    modules/freetype/src/cache/ftcache.c
+    modules/freetype/src/cid/type1cid.c
+    modules/freetype/src/lzw/ftlzw.c
+    modules/freetype/src/svg/svg.c
+    modules/freetype/src/raster/raster.c
+    modules/freetype/src/winfonts/winfnt.c
+    modules/freetype/src/smooth/smooth.c
+    modules/freetype/src/pcf/pcf.c
+    modules/freetype/src/gzip/ftgzip.c
+    modules/freetype/src/pfr/pfr.c
+    # modules/freetype/src/base/ftver.rc.res
+    modules/freetype/src/pshinter/pshinter.c
+    modules/freetype/src/type42/type42.c
+    modules/freetype/src/sdf/sdf.c
+    modules/freetype/src/cff/cff.c
+    modules/freetype/src/psnames/psnames.c
+    modules/freetype/src/autofit/autofit.c
+    modules/freetype/src/type1/type1.c
+    modules/freetype/src/base/ftbase.c
+    modules/freetype/src/psaux/psaux.c
+    modules/freetype/src/truetype/truetype.c
+    modules/freetype/src/sfnt/sfnt.c
+    )
+
+set(FREETYPE_DEFINES
+    FT_CONFIG_CONFIG_H=<freetype/config/ftconfig.h>
+    FT_CONFIG_OPTIONS_H=<freetype/config/ftoption.h>
+    FT_CONFIG_STANDARD_LIBRARY_H=<freetype/config/ftstdlib.h>
+    FT_CONFIG_MODULES_H=<freetype/config/ftmodule.h>
+    FT_BEGIN_HEADER=;
+    FT_END_HEADER=;
+    FT2_BUILD_LIBRARY
+)
+if (WIN32)
+    list(APPEND FREETYPE_SRC
+        modules/freetype/builds/windows/ftdebug.c
+        modules/freetype/builds/windows/ftsystem.c
+        )
+    list(APPEND FREETYPE_DEFINES
+        _CRT_SECURE_NO_WARNINGS
+        )
+elseif(APPLE)
+    list(APPEND FREETYPE_SRC
+        modules/freetype/builds/mac/ftmac.c
+        modules/freetype/src/base/ftdebug.c
+        modules/freetype/builds/unix/ftsystem.c
+        )
+    list(APPEND FREETYPE_DEFINES
+        HAVE_FCNTL_H
+        HAVE_UNISTD_H
+        )
+endif()
+
+add_library(freetype2 STATIC ${FREETYPE_SRC})
+
+target_include_directories(freetype2 PRIVATE
+    modules/freetype/include
+    )
+target_compile_definitions(freetype2 PRIVATE ${FREETYPE_DEFINES})
+
+# Build HarfBuzz
+add_library(harfbuzz STATIC modules/harfbuzz/src/harfbuzz.cc) # unity build
+target_compile_definitions(harfbuzz PRIVATE HAVE_FREETYPE HB_NO_PRAGMA_GCC_DIAGNOSTIC_WARNING _CRT_SECURE_NO_WARNINGS)
+target_compile_options(harfbuzz PRIVATE -Wno-deprecated-declarations)
+target_link_libraries(harfbuzz PRIVATE freetype2)
+target_include_directories(harfbuzz PRIVATE modules/freetype/include)
+
+list(APPEND PLUGIN_LIBRARIES harfbuzz)
 
 
 # ██████╗ ██╗     ██╗   ██╗ ██████╗ ██╗███╗   ██╗
@@ -298,6 +392,7 @@ if (WIN32 AND CMAKE_BUILD_TYPE MATCHES Debug)
     target_compile_definitions(${HOTRELOAD_LIB_NAME} PRIVATE ${PLUGIN_DEFINITIONS} CPLUG_SHARED CPLUG_BUILD_STANDALONE)
     target_include_directories(${HOTRELOAD_LIB_NAME} PRIVATE ${PLUGIN_INCLUDE})
     target_compile_options(${HOTRELOAD_LIB_NAME} PRIVATE ${PLUGIN_OPTIONS})
+    target_link_libraries(${HOTRELOAD_LIB_NAME} PRIVATE ${PLUGIN_LIBRARIES})
 
     # Windows paths are complicated
     string(REPLACE "/" "\\\\" SOURCE_DIR_WIN ${PROJECT_SOURCE_DIR})
