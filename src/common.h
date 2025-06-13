@@ -43,8 +43,10 @@ void println(const char* const fmt, ...);
 #endif
 
 #ifdef CPLUG_BUILD_STANDALONE
-#define XFILES_ASSERT          xassert
-#define CPLUG_LOG_ASSERT(cond) xassert((cond));
+#define XFILES_ASSERT xassert
+#define CPLUG_LOG_ASSERT(cond)                                                                                         \
+    if (!(cond))                                                                                                       \
+        (println("xassert(" #cond ")"), xassert((cond)));
 #else // !CPLUG_BUILD_STANDALONE
 #define XFILES_ASSERT(cond) CPLUG_LOG_ASSERT((cond))
 #endif // CPLUG_BUILD_STANDALONE
@@ -80,11 +82,17 @@ void println(const char* const fmt, ...);
 
 enum
 {
-    GUI_INIT_WIDTH  = 960,
-    GUI_INIT_HEIGHT = 400,
+    // GUI_INIT_WIDTH  = 960,
+    // GUI_INIT_HEIGHT = 400,
 
-    GUI_MIN_WIDTH  = (GUI_INIT_WIDTH * 3) / 4,
-    GUI_MIN_HEIGHT = (GUI_INIT_HEIGHT * 7) / 8,
+    // GUI_MIN_WIDTH  = (GUI_INIT_WIDTH * 3) / 4,
+    // GUI_MIN_HEIGHT = (GUI_INIT_HEIGHT * 7) / 8,
+
+    GUI_INIT_WIDTH  = 512,
+    GUI_INIT_HEIGHT = 512,
+
+    GUI_MIN_WIDTH  = 128,
+    GUI_MIN_HEIGHT = 128,
 };
 
 #endif // PLUGIN_CONFIG_H

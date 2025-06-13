@@ -27,8 +27,10 @@
 #include <text.glsl.h>
 
 // TODO
-// Do layout with harfbuzz
-// Handle proper blending of text
+// Handle variety of text alignments. eg TL, TC, TR, CL, CC, CR, BL, BC, BR
+// Test mixed language strings
+// Handle proper blending of text so glyphs don't clip each other
+// Handle proper blending of text so subpixel antialiasing blends with background
 // Handle multiple fonts (bold/italic) & font sizes
 // If atlas is full, create new font atlas
 // Add ability to clear font atlas on resize
@@ -85,6 +87,48 @@ typedef struct
     int16_t u, v;
 } vertex_t;
 
+enum
+{
+    // MAX_SQUARES  = 1024 * 10 + 512 + 128 + 32 + 8 + 2,
+    // MAX_SQUARES = (1 << 16) / 6,
+    MAX_SQUARES  = 128,
+    MAX_VERTICES = MAX_SQUARES * 4,
+    MAX_INDICES  = MAX_SQUARES * 6,
+
+    ATLAS_WIDTH       = 128,
+    ATLAS_HEIGHT      = ATLAS_WIDTH,
+    ATLAS_ROW_STRIDE  = ATLAS_WIDTH * 4,
+    ATLAS_INT16_SHIFT = 8,
+
+    FONT_SIZE = 12,
+};
+_Static_assert(MAX_INDICES < UINT16_MAX, "UINT16 Overflow");
+_Static_assert((ATLAS_WIDTH << ATLAS_INT16_SHIFT) == (1 << 15), "");
+
+// Used to identify a unique glyph.
+// TODO: support multiple fonts
+union atlas_rect_header
+{
+    struct
+    {
+        uint32_t glyphid;
+        float    font_size;
+    };
+    uint64_t data;
+};
+
+typedef struct atlas_rect_t
+{
+    union atlas_rect_header header;
+
+    int pen_offset_x;
+    int pen_offset_y;
+
+    uint8_t  x, y, w, h;
+    sg_image atlas;
+} atlas_rect;
+_Static_assert(ATLAS_WIDTH <= UINT8_MAX + 1, "");
+
 typedef struct GUI
 {
     Plugin*      plugin;
@@ -93,7 +137,7 @@ typedef struct GUI
 
     stbrp_context font_atlas;
     stbrp_node*   nodes;
-    stbrp_rect*   rects;
+    atlas_rect*   rects;
 
     FT_Library ft_lib;
     FT_Face    ft_face;
@@ -105,6 +149,10 @@ typedef struct GUI
     sg_sampler  smp;
 
     // struct load_img_t brain;
+    size_t   num_vertices;
+    size_t   num_indices;
+    vertex_t vertices[MAX_VERTICES];
+    uint16_t indices[MAX_INDICES];
 } GUI;
 
 static void my_sg_logger(
@@ -191,84 +239,21 @@ void* pw_create_gui(void* _plugin, void* _pw)
         .pipeline_pool_size = 512,
     });
 
-    int err = FT_Init_FreeType(&gui->ft_lib);
-    xassert(!err);
-    err = FT_New_Face(gui->ft_lib, "C:\\Windows\\Fonts\\arialbd.ttf", 0, &gui->ft_face);
-    xassert(!err);
-    println("Found %ld glyphs", gui->ft_face->num_glyphs);
-
-    const float FONT_SIZE = 12;
-    const float DPI       = 96;
-    FT_Set_Char_Size(gui->ft_face, 0, FONT_SIZE * 64, DPI, DPI);
-
-    const int      ATLAS_WIDTH      = 128;
-    const int      ATLAS_HEIGHT     = ATLAS_WIDTH;
-    const int      ATLAS_ROW_STRIDE = ATLAS_WIDTH * 4;
-    unsigned char* atlas            = xcalloc(1, ATLAS_HEIGHT * ATLAS_ROW_STRIDE);
-
-    xarr_setlen(gui->nodes, (ATLAS_WIDTH * 2));
-    stbrp_init_target(&gui->font_atlas, ATLAS_WIDTH, ATLAS_HEIGHT, gui->nodes, xarr_len(gui->nodes));
-
-    // from "!" to "~" https://www.ascii-code.com/
-    for (int codepoint = 33; codepoint < 127; codepoint++)
-    {
-        FT_UInt glyph_index = FT_Get_Char_Index(gui->ft_face, codepoint);
-        err                 = FT_Load_Glyph(gui->ft_face, glyph_index, FT_LOAD_DEFAULT);
-        xassert(!err);
-
-        FT_Render_Mode render_mode = FT_RENDER_MODE_LCD; // subpixel antialiasing, horizontal screen
-        FT_Render_Glyph(gui->ft_face->glyph, render_mode);
-
-        const FT_Bitmap* bmp = &gui->ft_face->glyph->bitmap;
-        xassert(bmp->pixel_mode == FT_PIXEL_MODE_LCD);
-        xassert((bmp->width % 3) == 0); // note: FT width is measured in bytes (subpixels)
-
-        // Note all glyphs have height/rows... (spaces?)
-        if (bmp->width && bmp->rows)
-        {
-            int        width_pixels = bmp->width / 3;
-            stbrp_rect rect         = {
-                        .id = glyph_index,
-                        .w  = width_pixels + 1,
-                        .h  = bmp->rows + 1,
-            };
-            int num_packed = stbrp_pack_rects(&gui->font_atlas, &rect, 1);
-            xassert(num_packed);
-            if (num_packed)
-            {
-                xarr_push(gui->rects, rect);
-
-                println("Printing character \"%c\" to atlas at %dx%d", (char)codepoint, rect.x, rect.y);
-
-                for (int y = 0; y < bmp->rows; y++)
-                {
-                    unsigned char* dst = atlas + (rect.y + y) * ATLAS_ROW_STRIDE + rect.x * 4;
-                    unsigned char* src = bmp->buffer + y * bmp->pitch;
-
-                    for (int x = 0; x < width_pixels; x++, dst += 4, src += 3)
-                    {
-                        dst[0] = src[0];
-                        dst[1] = src[1];
-                        dst[2] = src[2];
-                        dst[3] = 0xff;
-                    }
-                }
-            }
-        }
-    }
-
     // img shader
     {
-        static const uint16_t indices[] = {0, 1, 2, 0, 2, 3};
-
         gui->vbo = sg_make_buffer(&(sg_buffer_desc){
             .usage.vertex_buffer = true,
             .usage.stream_update = true,
-            .size                = sizeof(vertex_t) * 4,
+            .size                = sizeof(gui->vertices),
             .label               = "img-vertices"});
 
-        gui->ibo = sg_make_buffer(
-            &(sg_buffer_desc){.usage.index_buffer = true, .data = SG_RANGE(indices), .label = "img-indices"});
+        gui->ibo = sg_make_buffer(&(sg_buffer_desc){
+            .usage.index_buffer  = true,
+            .usage.stream_update = true,
+            .size                = sizeof(gui->indices),
+            .label               = "img-indices"});
+
+        // sg_update_buffer(gui->ibo, &SG_RANGE(indices));
 
         sg_shader shd = sg_make_shader(text_shader_desc(sg_query_backend()));
         gui->pip      = sg_make_pipeline(&(sg_pipeline_desc){
@@ -299,16 +284,95 @@ void* pw_create_gui(void* _plugin, void* _pw)
         });
 
         gui->img = sg_make_image(&(sg_image_desc){
-            .width  = ATLAS_WIDTH,
-            .height = ATLAS_HEIGHT,
-            // .num_slices   = 1,
-            .pixel_format = SG_PIXELFORMAT_RGBA8,
+            .width                = ATLAS_WIDTH,
+            .height               = ATLAS_HEIGHT,
+            .pixel_format         = SG_PIXELFORMAT_RGBA8,
+            .usage.dynamic_update = true,
+        });
 
-            .data.subimage[0][0] = {
+        xassert(gui->img.id);
+    }
+
+    int err = FT_Init_FreeType(&gui->ft_lib);
+    xassert(!err);
+    err = FT_New_Face(gui->ft_lib, "C:\\Windows\\Fonts\\arialbd.ttf", 0, &gui->ft_face);
+    xassert(!err);
+    println("Found %ld glyphs", gui->ft_face->num_glyphs);
+
+    const float DPI = 96;
+    FT_Set_Char_Size(gui->ft_face, 0, FONT_SIZE * 64, DPI, DPI);
+
+    unsigned char* atlas = xcalloc(1, ATLAS_HEIGHT * ATLAS_ROW_STRIDE);
+
+    xarr_setlen(gui->nodes, (ATLAS_WIDTH * 2));
+    stbrp_init_target(&gui->font_atlas, ATLAS_WIDTH, ATLAS_HEIGHT, gui->nodes, xarr_len(gui->nodes));
+
+    // from "!" to "~" https://www.ascii-code.com/
+    for (int codepoint = 33; codepoint < 127; codepoint++)
+    {
+        FT_UInt glyph_index = FT_Get_Char_Index(gui->ft_face, codepoint);
+        err                 = FT_Load_Glyph(gui->ft_face, glyph_index, FT_LOAD_DEFAULT);
+        xassert(!err);
+
+        FT_GlyphSlot glyph = gui->ft_face->glyph;
+
+        FT_Render_Mode render_mode = FT_RENDER_MODE_LCD; // subpixel antialiasing, horizontal screen
+        FT_Render_Glyph(glyph, render_mode);
+
+        const FT_Bitmap* bmp = &glyph->bitmap;
+        xassert(bmp->pixel_mode == FT_PIXEL_MODE_LCD);
+        xassert((bmp->width % 3) == 0); // note: FT width is measured in bytes (subpixels)
+
+        // Note all glyphs have height/rows... (spaces?)
+        if (bmp->width && bmp->rows)
+        {
+            int        width_pixels = bmp->width / 3;
+            stbrp_rect rect         = {.w = width_pixels + 1, .h = bmp->rows + 1};
+            int        num_packed   = stbrp_pack_rects(&gui->font_atlas, &rect, 1);
+            xassert(num_packed);
+            if (num_packed)
+            {
+                atlas_rect arect;
+                arect.header.glyphid   = glyph_index;
+                arect.header.font_size = FONT_SIZE;
+                arect.pen_offset_x     = glyph->bitmap_left;
+                arect.pen_offset_y     = glyph->bitmap_top;
+                arect.x                = rect.x;
+                arect.y                = rect.y;
+                arect.w                = width_pixels;
+                arect.h                = bmp->rows;
+                arect.atlas            = gui->img;
+                xassert(arect.x + arect.w <= ATLAS_WIDTH);
+                xassert(arect.y + arect.h <= ATLAS_HEIGHT);
+
+                xarr_push(gui->rects, arect);
+
+                // println("Printing character \"%c\" to atlas at %dx%d", (char)codepoint, rect.x, rect.y);
+
+                for (int y = 0; y < bmp->rows; y++)
+                {
+                    unsigned char* dst = atlas + (rect.y + y) * ATLAS_ROW_STRIDE + rect.x * 4;
+                    unsigned char* src = bmp->buffer + y * bmp->pitch;
+
+                    for (int x = 0; x < width_pixels; x++, dst += 4, src += 3)
+                    {
+                        dst[0] = src[0];
+                        dst[1] = src[1];
+                        dst[2] = src[2];
+                        dst[3] = 0xff;
+                    }
+                }
+            }
+        }
+    }
+
+    sg_update_image(
+        gui->img,
+        &(sg_image_data){
+            .subimage[0][0] = {
                 .ptr  = atlas,
                 .size = ATLAS_HEIGHT * ATLAS_ROW_STRIDE,
             }});
-    }
 
     xfree(atlas);
 
@@ -370,6 +434,9 @@ void pw_tick(void* _gui)
     if (!gui || !gui->plugin)
         return;
 
+    gui->num_indices  = 0;
+    gui->num_vertices = 0;
+
     const int   gui_width  = gui->plugin->width;
     const int   gui_height = gui->plugin->height;
     const float dpi        = pw_get_dpi(gui->pw);
@@ -399,34 +466,136 @@ void pw_tick(void* _gui)
         sg_begin_pass(&(sg_pass){.action = pass_action, .swapchain = swapchain});
     }
 
-    // Logo shader
+    hb_buffer_t* buf = hb_buffer_create();
+    // hb_language_t default_language = hb_language_get_default();
+    // xassert(default_language != NULL);
+    // hb_buffer_set_language(buf, default_language);
+
+    const char* my_text = "abc";
+    // const char* my_text = "Sphinx of black quartz, judge my vow";
+    // const char* my_text     = "AV. .W.V.";
+    size_t my_text_len = strlen(my_text);
+    hb_buffer_add_utf8(buf, my_text, my_text_len, 0, my_text_len);
+    // If we know the language:
+    // hb_buffer_set_direction(buf, HB_DIRECTION_LTR);
+    // hb_buffer_set_script(buf, HB_SCRIPT_LATIN);
+    // hb_buffer_set_language(buf, hb_language_from_string("en", -1));
+    // If we don't know the language:
+    hb_buffer_guess_segment_properties(buf);
+
+    hb_font_t* font = hb_ft_font_create(gui->ft_face, NULL);
+    hb_shape(font, buf, NULL, 0);
+
+    unsigned int         glyph_count;
+    hb_glyph_info_t*     glyph_info = hb_buffer_get_glyph_infos(buf, &glyph_count);
+    hb_glyph_position_t* glyph_pos  = hb_buffer_get_glyph_positions(buf, &glyph_count);
+
+    int max_font_height_pixels = (gui->ft_face->size->metrics.ascender - gui->ft_face->size->metrics.descender) >> 6;
+
+    hb_position_t pen_x = 0;
+    hb_position_t pen_y = max_font_height_pixels + (gui->ft_face->size->metrics.descender >> 6);
+
+    // Move pen to centre of gui
+    pen_x += 10;             // padding
+    pen_y += gui_height / 2; // Vertical centre
+    pen_y -= FONT_SIZE / 2;
+
+    for (unsigned int i = 0; i < glyph_count; i++)
     {
-        float l = -1;
-        float r = 1;
-        float t = -1;
-        float b = 1;
+        const hb_glyph_info_t*     info = glyph_info + i;
+        const hb_glyph_position_t* pos  = glyph_pos + i;
 
-        // clang-format off
-        vertex_t verts[] = {
-            {l, t, 0,     32767},
-            {r, t, 32767, 32767},
-            {r, b, 32767, 0},
-            {l, b, 0,     0},
-        };
+        atlas_rect* rect      = NULL;
+        const int   num_rects = xarr_len(gui->rects);
+        for (int j = 0; j < num_rects; j++)
+        {
+            if (gui->rects[j].header.glyphid == info->codepoint)
+            {
+                rect = gui->rects + j;
+                break;
+            }
+        }
 
-        sg_update_buffer(gui->vbo, &SG_RANGE(verts));
+        if (rect)
+        {
+            int16_t tex_l = rect->x;
+            int16_t tex_t = rect->y;
+            int16_t tex_r = rect->x + rect->w;
+            int16_t tex_b = rect->y + rect->h;
+
+            xassert(tex_l >= 0 && tex_l < 128);
+            xassert(tex_t >= 0 && tex_t < 128);
+            xassert(tex_r >= 0 && tex_r < 128);
+            xassert(tex_b >= 0 && tex_b < 128);
+
+            // atlas coordinates to INT16 normalised texture coordinates
+            tex_l <<= ATLAS_INT16_SHIFT;
+            tex_t <<= ATLAS_INT16_SHIFT;
+            tex_r <<= ATLAS_INT16_SHIFT;
+            tex_b <<= ATLAS_INT16_SHIFT;
+
+            int glyph_left   = pen_x + rect->pen_offset_x;
+            int glyph_top    = pen_y - rect->pen_offset_y;
+            int glyph_right  = glyph_left + (int)rect->w;
+            int glyph_bottom = glyph_top + (int)rect->h;
+            // float l            = -1;
+            // float b            = -1;
+            // float r            = 1;
+            // float t            = 1;
+            float l = xm_mapf(glyph_left, 0, gui_width, -1, 1);
+            float r = xm_mapf(glyph_right, 0, gui_width, -1, 1);
+            float t = xm_mapf(glyph_top, 0, gui_height, 1, -1);
+            float b = xm_mapf(glyph_bottom, 0, gui_height, 1, -1);
+
+            xassert(gui->num_vertices + 4 <= MAX_VERTICES);
+            xassert(gui->num_indices + 6 <= MAX_INDICES);
+            uint16_t nvert           = gui->num_vertices;
+            uint16_t nidx            = gui->num_indices;
+            gui->vertices[nvert + 0] = (vertex_t){l, t, tex_l, tex_t};
+            gui->vertices[nvert + 1] = (vertex_t){r, t, tex_r, tex_t};
+            gui->vertices[nvert + 2] = (vertex_t){r, b, tex_r, tex_b};
+            gui->vertices[nvert + 3] = (vertex_t){l, b, tex_l, tex_b};
+
+            gui->indices[nidx + 0] = nvert + 0;
+            gui->indices[nidx + 1] = nvert + 1;
+            gui->indices[nidx + 2] = nvert + 2;
+            gui->indices[nidx + 3] = nvert + 0;
+            gui->indices[nidx + 4] = nvert + 2;
+            gui->indices[nidx + 5] = nvert + 3;
+
+            gui->num_vertices += 4;
+            gui->num_indices  += 6;
+        }
+
+        pen_x += pos->x_advance >> 6;
+        pen_y += pos->y_advance >> 6;
+
+        // break;
+    }
+
+    // IMG shader
+    if (gui->num_indices)
+    {
+        sg_range vert_range = {.ptr = gui->vertices, .size = sizeof(gui->vertices[0]) * gui->num_vertices};
+        sg_range idx_range  = {.ptr = gui->indices, .size = sizeof(gui->indices[0]) * gui->num_indices};
+        sg_update_buffer(gui->vbo, &vert_range);
+        sg_update_buffer(gui->ibo, &idx_range);
+
         sg_apply_pipeline(gui->pip);
 
-        sg_bindings bind       = {0};
-        bind.vertex_buffers[0] = gui->vbo;
-        bind.index_buffer      = gui->ibo;
-        bind.images[IMG_text_tex]   = gui->img;
+        sg_bindings bind          = {0};
+        bind.vertex_buffers[0]    = gui->vbo;
+        bind.index_buffer         = gui->ibo;
+        bind.images[IMG_text_tex] = gui->img;
         // bind.images[IMG_text_tex]   = gui->brain.img;
         bind.samplers[SMP_text_smp] = gui->smp;
 
         sg_apply_bindings(&bind);
-        sg_draw(0, 6, 1);
+        sg_draw(0, gui->num_indices, 1);
     }
+
+    hb_font_destroy(font);
+    hb_buffer_destroy(buf);
 
     sg_end_pass();
     sg_commit();

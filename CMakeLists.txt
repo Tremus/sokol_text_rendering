@@ -168,6 +168,13 @@ elseif(APPLE)
 endif()
 
 
+# ███████╗██████╗ ███████╗███████╗████████╗██╗   ██╗██████╗ ███████╗
+# ██╔════╝██╔══██╗██╔════╝██╔════╝╚══██╔══╝╚██╗ ██╔╝██╔══██╗██╔════╝
+# █████╗  ██████╔╝█████╗  █████╗     ██║    ╚████╔╝ ██████╔╝█████╗
+# ██╔══╝  ██╔══██╗██╔══╝  ██╔══╝     ██║     ╚██╔╝  ██╔═══╝ ██╔══╝
+# ██║     ██║  ██║███████╗███████╗   ██║      ██║   ██║     ███████╗
+# ╚═╝     ╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝      ╚═╝   ╚═╝     ╚══════╝
+
 set(FREETYPE_SRC
     # modules/freetype/src/bzip2/ftbzip2.c
     modules/freetype/src/base/ftbdf.c
@@ -248,7 +255,13 @@ target_include_directories(freetype2 PRIVATE
     )
 target_compile_definitions(freetype2 PRIVATE ${FREETYPE_DEFINES})
 
-# Build HarfBuzz
+# ██╗  ██╗ █████╗ ██████╗ ███████╗██████╗ ██╗   ██╗███████╗███████╗
+# ██║  ██║██╔══██╗██╔══██╗██╔════╝██╔══██╗██║   ██║╚══███╔╝╚══███╔╝
+# ███████║███████║██████╔╝█████╗  ██████╔╝██║   ██║  ███╔╝   ███╔╝ 
+# ██╔══██║██╔══██║██╔══██╗██╔══╝  ██╔══██╗██║   ██║ ███╔╝   ███╔╝  
+# ██║  ██║██║  ██║██║  ██║██║     ██████╔╝╚██████╔╝███████╗███████╗
+# ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═════╝  ╚═════╝ ╚══════╝╚══════╝
+
 add_library(harfbuzz STATIC modules/harfbuzz/src/harfbuzz.cc) # unity build
 target_compile_definitions(harfbuzz PRIVATE HAVE_FREETYPE HB_NO_PRAGMA_GCC_DIAGNOSTIC_WARNING _CRT_SECURE_NO_WARNINGS)
 target_compile_options(harfbuzz PRIVATE -Wno-deprecated-declarations)
