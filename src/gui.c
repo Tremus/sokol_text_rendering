@@ -20,11 +20,19 @@
 #include <string.h>
 
 #include <ft2build.h>
+#include FT_FREETYPE_H
+
+#include <text.glsl.h>
+
+// #define USE_HARFBUZZ
+#ifdef USE_HARFBUZZ
 #include <hb.h>
 
 #include <hb-ft.h>
-
-#include <text.glsl.h>
+#else
+#define KB_TEXT_SHAPE_IMPLEMENTATION
+#include "kb_text_shape.h"
+#endif // !USE_HARFBUZZ
 
 // TODO
 // Bind correct atlas img when drawing text
@@ -170,6 +178,12 @@ typedef struct GUI
     FT_Library ft_lib;
     FT_Face    ft_face;
 
+#ifndef USE_HARFBUZZ
+    kbts_font   kb_font;
+    kbts_glyph* Glyphs;
+    uint32_t    GlyphCapacity;
+#endif
+
     sg_pipeline pip;
     sg_buffer   vbo;
     sg_buffer   ibo;
@@ -281,6 +295,7 @@ int raster_glyph(GUI* gui, uint32_t glyph_index)
     return num_packed;
 }
 
+// Get cached rect. Rasters the rect to an atlas if not already cached
 atlas_rect* get_glyph_rect(GUI* gui, uint32_t glyph_index)
 {
     atlas_rect* rect      = NULL;
@@ -300,6 +315,62 @@ atlas_rect* get_glyph_rect(GUI* gui, uint32_t glyph_index)
         rect = gui->rects + num_rects;
     }
     return rect;
+}
+
+void draw_glyph(GUI* gui, unsigned glyph_idx, int pen_x, int pen_y)
+{
+    atlas_rect* rect = get_glyph_rect(gui, glyph_idx);
+
+    if (rect)
+    {
+        int16_t tex_l = rect->x;
+        int16_t tex_t = rect->y;
+        int16_t tex_r = rect->x + rect->w;
+        int16_t tex_b = rect->y + rect->h;
+
+        xassert(tex_l >= 0 && tex_l < 128);
+        xassert(tex_t >= 0 && tex_t < 128);
+        xassert(tex_r >= 0 && tex_r < 128);
+        xassert(tex_b >= 0 && tex_b < 128);
+
+        // atlas coordinates to INT16 normalised texture coordinates
+        tex_l <<= ATLAS_INT16_SHIFT;
+        tex_t <<= ATLAS_INT16_SHIFT;
+        tex_r <<= ATLAS_INT16_SHIFT;
+        tex_b <<= ATLAS_INT16_SHIFT;
+
+        int glyph_left   = pen_x + rect->pen_offset_x;
+        int glyph_top    = pen_y - rect->pen_offset_y;
+        int glyph_right  = glyph_left + (int)rect->w;
+        int glyph_bottom = glyph_top + (int)rect->h;
+
+        const int gui_width  = gui->plugin->width;
+        const int gui_height = gui->plugin->height;
+
+        float l = xm_mapf(glyph_left, 0, gui_width, -1, 1);
+        float r = xm_mapf(glyph_right, 0, gui_width, -1, 1);
+        float t = xm_mapf(glyph_top, 0, gui_height, 1, -1);
+        float b = xm_mapf(glyph_bottom, 0, gui_height, 1, -1);
+
+        xassert(gui->num_vertices + 4 <= MAX_VERTICES);
+        xassert(gui->num_indices + 6 <= MAX_INDICES);
+        uint16_t nvert           = gui->num_vertices;
+        uint16_t nidx            = gui->num_indices;
+        gui->vertices[nvert + 0] = (vertex_t){l, t, tex_l, tex_t};
+        gui->vertices[nvert + 1] = (vertex_t){r, t, tex_r, tex_t};
+        gui->vertices[nvert + 2] = (vertex_t){r, b, tex_r, tex_b};
+        gui->vertices[nvert + 3] = (vertex_t){l, b, tex_l, tex_b};
+
+        gui->indices[nidx + 0] = nvert + 0;
+        gui->indices[nidx + 1] = nvert + 1;
+        gui->indices[nidx + 2] = nvert + 2;
+        gui->indices[nidx + 3] = nvert + 0;
+        gui->indices[nidx + 4] = nvert + 2;
+        gui->indices[nidx + 5] = nvert + 3;
+
+        gui->num_vertices += 4;
+        gui->num_indices  += 6;
+    }
 }
 
 static void my_sg_logger(
@@ -479,6 +550,11 @@ void* pw_create_gui(void* _plugin, void* _pw)
     //     xassert(ok);
     // }
 
+#ifndef USE_HARFBUZZ
+    // Open a font file
+    gui->kb_font = kbts_FontFromFile(font_path);
+#endif
+
     return gui;
 }
 
@@ -498,6 +574,10 @@ void pw_destroy_gui(void* _gui)
     xassert(!error);
     error = FT_Done_FreeType(gui->ft_lib);
     xassert(!error);
+
+#ifndef USE_HARFBUZZ
+    kbts_FreeFont(&gui->kb_font);
+#endif
 
     gui->plugin->gui = NULL;
     MY_FREE(gui);
@@ -559,17 +639,30 @@ void pw_tick(void* _gui)
         sg_begin_pass(&(sg_pass){.action = pass_action, .swapchain = swapchain});
     }
 
+    // https://utf8everywhere.org/
+    // const char* my_text = "abc";
+    // const char* my_text = "Sphinx of black quartz, judge my vow";
+    // const char* my_text = "AV. .W.V.";
+    const char* my_text = "UTF8 Приве́т नमस्ते שָׁלוֹם 🐨";
+    // const char* my_text = "UTF8 Приве́т नमस्ते שָׁלוֹם";
+    // const char* my_text = "UTF8 Приве́т";
+
+    int max_font_height_pixels = (gui->ft_face->size->metrics.ascender - gui->ft_face->size->metrics.descender) >> 6;
+
+    int pen_x = 0;
+    int pen_y = max_font_height_pixels + (gui->ft_face->size->metrics.descender >> 6);
+
+    // Move pen to centre of gui
+    pen_x += 10;             // padding
+    pen_y += gui_height / 2; // Vertical centre
+    pen_y -= FONT_SIZE / 2;
+
+// Harfbuzz
+#ifdef USE_HARFBUZZ
     hb_buffer_t* buf = hb_buffer_create();
     // hb_language_t default_language = hb_language_get_default();
     // xassert(default_language != NULL);
     // hb_buffer_set_language(buf, default_language);
-
-    // https://utf8everywhere.org/
-    // const char* my_text = "abc";
-    // const char* my_text = "Sphinx of black quartz, judge my vow";
-    // const char* my_text     = "AV. .W.V.";
-    const char* my_text = "UTF8 Приве́т नमस्ते שָׁלוֹם 🐨";
-    // const char* my_text = "UTF8 Приве́т";
 
     size_t my_text_len = strlen(my_text);
     hb_buffer_add_utf8(buf, my_text, my_text_len, 0, my_text_len);
@@ -587,79 +680,86 @@ void pw_tick(void* _gui)
     hb_glyph_info_t*     glyph_info = hb_buffer_get_glyph_infos(buf, &glyph_count);
     hb_glyph_position_t* glyph_pos  = hb_buffer_get_glyph_positions(buf, &glyph_count);
 
-    int max_font_height_pixels = (gui->ft_face->size->metrics.ascender - gui->ft_face->size->metrics.descender) >> 6;
-
-    hb_position_t pen_x = 0;
-    hb_position_t pen_y = max_font_height_pixels + (gui->ft_face->size->metrics.descender >> 6);
-
-    // Move pen to centre of gui
-    pen_x += 10;             // padding
-    pen_y += gui_height / 2; // Vertical centre
-    pen_y -= FONT_SIZE / 2;
-
     for (unsigned int i = 0; i < glyph_count; i++)
     {
         const hb_glyph_info_t*     info = glyph_info + i;
         const hb_glyph_position_t* pos  = glyph_pos + i;
 
-        atlas_rect* rect = get_glyph_rect(gui, info->codepoint);
-
-        if (rect)
-        {
-            int16_t tex_l = rect->x;
-            int16_t tex_t = rect->y;
-            int16_t tex_r = rect->x + rect->w;
-            int16_t tex_b = rect->y + rect->h;
-
-            xassert(tex_l >= 0 && tex_l < 128);
-            xassert(tex_t >= 0 && tex_t < 128);
-            xassert(tex_r >= 0 && tex_r < 128);
-            xassert(tex_b >= 0 && tex_b < 128);
-
-            // atlas coordinates to INT16 normalised texture coordinates
-            tex_l <<= ATLAS_INT16_SHIFT;
-            tex_t <<= ATLAS_INT16_SHIFT;
-            tex_r <<= ATLAS_INT16_SHIFT;
-            tex_b <<= ATLAS_INT16_SHIFT;
-
-            int glyph_left   = pen_x + rect->pen_offset_x;
-            int glyph_top    = pen_y - rect->pen_offset_y;
-            int glyph_right  = glyph_left + (int)rect->w;
-            int glyph_bottom = glyph_top + (int)rect->h;
-            // float l            = -1;
-            // float b            = -1;
-            // float r            = 1;
-            // float t            = 1;
-            float l = xm_mapf(glyph_left, 0, gui_width, -1, 1);
-            float r = xm_mapf(glyph_right, 0, gui_width, -1, 1);
-            float t = xm_mapf(glyph_top, 0, gui_height, 1, -1);
-            float b = xm_mapf(glyph_bottom, 0, gui_height, 1, -1);
-
-            xassert(gui->num_vertices + 4 <= MAX_VERTICES);
-            xassert(gui->num_indices + 6 <= MAX_INDICES);
-            uint16_t nvert           = gui->num_vertices;
-            uint16_t nidx            = gui->num_indices;
-            gui->vertices[nvert + 0] = (vertex_t){l, t, tex_l, tex_t};
-            gui->vertices[nvert + 1] = (vertex_t){r, t, tex_r, tex_t};
-            gui->vertices[nvert + 2] = (vertex_t){r, b, tex_r, tex_b};
-            gui->vertices[nvert + 3] = (vertex_t){l, b, tex_l, tex_b};
-
-            gui->indices[nidx + 0] = nvert + 0;
-            gui->indices[nidx + 1] = nvert + 1;
-            gui->indices[nidx + 2] = nvert + 2;
-            gui->indices[nidx + 3] = nvert + 0;
-            gui->indices[nidx + 4] = nvert + 2;
-            gui->indices[nidx + 5] = nvert + 3;
-
-            gui->num_vertices += 4;
-            gui->num_indices  += 6;
-        }
+        draw_glyph(gui, info->codepoint, pen_x, pen_y);
 
         pen_x += pos->x_advance >> 6;
         pen_y += pos->y_advance >> 6;
 
         // break;
     }
+
+    hb_font_destroy(font);
+    hb_buffer_destroy(buf);
+
+#else  // !USE_HARFBUZZ
+
+    // kb_text_shape
+    size_t Length = strlen(my_text);
+
+    kbts_font* Font = &gui->kb_font;
+    // Make some glyphs
+    if (Length > gui->GlyphCapacity)
+    {
+        gui->Glyphs        = (kbts_glyph*)realloc(gui->Glyphs, sizeof(kbts_glyph) * Length);
+        gui->GlyphCapacity = Length;
+    }
+    uint32_t       GlyphCount = 0;
+    kbts_script    Script     = KBTS_SCRIPT_DONT_KNOW;
+    kbts_direction Direction  = KBTS_DIRECTION_NONE;
+    for (size_t StringAt = 0; StringAt < Length;)
+    {
+        kbts_decode Decode  = kbts_DecodeUtf8(my_text + StringAt, Length - StringAt);
+        StringAt           += Decode.SourceCharactersConsumed;
+        if (Decode.Valid)
+        {
+            kbts_glyph Glyph = kbts_CodepointToGlyph(Font, Decode.Codepoint);
+            // Easy script inference for simple cases. (This is similar to
+            // hb_buffer_guess_segment_properties.) If you have already segmented
+            // String with our API, you already have a script! So no need to pass it
+            // in that case. Only use this as a shorthand, when you are pretty sure
+            // String is a single script.
+            kbts_InferScript(&Direction, &Script, Glyph.Script);
+            gui->Glyphs[GlyphCount++] = Glyph;
+        }
+    }
+    // Shape
+    kbts_shape_state* State = kbts_CreateShapeState(Font);
+    // A shape_config is immutable once created. You can freely share/hash it,
+    // etc.
+    kbts_shape_config Config = kbts_ShapeConfig(Font, Script, KBTS_LANGUAGE_DONT_KNOW);
+    while (kbts_Shape(State, &Config, Direction, Direction, gui->Glyphs, &GlyphCount, gui->GlyphCapacity))
+    {
+        gui->Glyphs        = realloc(gui->Glyphs, sizeof(kbts_glyph) * State->RequiredGlyphCapacity);
+        gui->GlyphCapacity = State->RequiredGlyphCapacity;
+    }
+    // Get final positions
+    kbts_cursor Cursor = kbts_Cursor(Direction);
+
+    // Move pen to centre of gui
+    const FT_Size_Metrics* FtSizeMetrics = &gui->ft_face->size->metrics;
+    for (size_t GlyphIndex = 0; GlyphIndex < GlyphCount; ++GlyphIndex)
+    {
+        int         X, Y;
+        kbts_glyph* glyph = &gui->Glyphs[GlyphIndex];
+        kbts_PositionGlyph(&Cursor, glyph, &X, &Y);
+
+        draw_glyph(gui, glyph->Id, pen_x, pen_y);
+
+        // pen_x += FT_MulFix(glyph->AdvanceX >> 6, FtSizeMetrics->x_scale);
+        // pen_y += FT_MulFix(glyph->AdvanceY >> 6, FtSizeMetrics->y_scale);
+        // pen_x += (glyph->AdvanceX * FtSizeMetrics->x_scale) >> 22;
+        // pen_y += (glyph->AdvanceY * FtSizeMetrics->y_scale) >> 22;
+        pen_x += ((glyph->AdvanceX >> 6) * FtSizeMetrics->x_scale) >> 16;
+        pen_y += ((glyph->AdvanceY >> 6) * FtSizeMetrics->y_scale) >> 16;
+    }
+
+    kbts_FreeShapeState(State);
+#endif // !USE_HARFBUZZ
 
     // IMG shader
     if (gui->num_indices)
@@ -693,9 +793,6 @@ void pw_tick(void* _gui)
         sg_apply_bindings(&bind);
         sg_draw(0, gui->num_indices, 1);
     }
-
-    hb_font_destroy(font);
-    hb_buffer_destroy(buf);
 
     sg_end_pass();
     sg_commit();
