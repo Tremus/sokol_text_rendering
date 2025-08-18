@@ -41,6 +41,11 @@ else()
     set(CMAKE_CXX_STANDARD 11)
 endif()
 
+set(SRC_DIR ${PROJECT_SOURCE_DIR})
+if (WIN32)
+    string(REPLACE "/" "\\\\" SRC_DIR ${PROJECT_SOURCE_DIR})
+endif()
+
 set(PLUGIN_OPTIONS "")
 
 # https://clang.llvm.org/docs/ClangCommandLineReference.html
@@ -110,6 +115,7 @@ set(PLUGIN_DEFINITIONS
     STBI_NO_STDIO
     STBI_NO_LINEAR
     NVG_NO_STB
+    SRC_DIR="${SRC_DIR}"
     )
 
 set(PLUGIN_SOURCES

@@ -1,3 +1,6 @@
+#include "libs/kb_text_shape.h"
+#include <stdlib.h>
+#include <vcruntime.h>
 #define STB_RECT_PACK_IMPLEMENTATION
 
 #include "common.h"
@@ -179,9 +182,14 @@ typedef struct GUI
     FT_Face    ft_face;
 
 #ifndef USE_HARFBUZZ
-    kbts_font   kb_font;
+    kbts_font         kb_font;
+    kbts_shape_state* kb_shape;
+
     kbts_glyph* Glyphs;
-    uint32_t    GlyphCapacity;
+    uint32_t    GlyphCap;
+
+    int*   Codepoints;
+    size_t CodepointCap;
 #endif
 
     sg_pipeline pip;
@@ -505,9 +513,11 @@ void* pw_create_gui(void* _plugin, void* _pw)
     int err = FT_Init_FreeType(&gui->ft_lib);
     xassert(!err);
     // const char* font_path = "C:\\Windows\\Fonts\\arialbd.ttf";
-    const char* font_path = "C:\\Windows\\Fonts\\segoeui.ttf";
+    // const char* font_path = "C:\\Windows\\Fonts\\segoeui.ttf";
     // const char* font_path = "C:\\Windows\\Fonts\\segoeuib.ttf"; // bold
     // const char* font_path = "C:\\Windows\\Fonts\\seguisb.ttf"; // semibold
+    // const char* font_path = SRC_DIR XFILES_DIR_STR "assets\\EBGaramond-Regular.ttf";
+    const char* font_path = SRC_DIR XFILES_DIR_STR "assets\\NotoSansHebrew-Regular.ttf";
     xassert(xfiles_exists(font_path));
     err = FT_New_Face(gui->ft_lib, font_path, 0, &gui->ft_face);
     xassert(!err);
@@ -552,7 +562,8 @@ void* pw_create_gui(void* _plugin, void* _pw)
 
 #ifndef USE_HARFBUZZ
     // Open a font file
-    gui->kb_font = kbts_FontFromFile(font_path);
+    gui->kb_font  = kbts_FontFromFile(font_path);
+    gui->kb_shape = kbts_CreateShapeState(&gui->kb_font);
 #endif
 
     return gui;
@@ -577,6 +588,9 @@ void pw_destroy_gui(void* _gui)
 
 #ifndef USE_HARFBUZZ
     kbts_FreeFont(&gui->kb_font);
+    kbts_FreeShapeState(gui->kb_shape);
+    xfree(gui->Codepoints);
+    xfree(gui->Glyphs);
 #endif
 
     gui->plugin->gui = NULL;
@@ -645,7 +659,9 @@ void pw_tick(void* _gui)
     // const char* my_text = "AV. .W.V.";
     const char* my_text = "UTF8 Приве́т नमस्ते שָׁלוֹם 🐨";
     // const char* my_text = "UTF8 Приве́т नमस्ते שָׁלוֹם";
+    // const char* my_text = "שָׁלוֹם";
     // const char* my_text = "UTF8 Приве́т";
+    size_t my_text_len = strlen(my_text);
 
     int max_font_height_pixels = (gui->ft_face->size->metrics.ascender - gui->ft_face->size->metrics.descender) >> 6;
 
@@ -653,7 +669,8 @@ void pw_tick(void* _gui)
     int pen_y = max_font_height_pixels + (gui->ft_face->size->metrics.descender >> 6);
 
     // Move pen to centre of gui
-    pen_x += 10;             // padding
+    // pen_x += 10;             // padding
+    pen_x  = gui_width / 2;  // padding
     pen_y += gui_height / 2; // Vertical centre
     pen_y -= FONT_SIZE / 2;
 
@@ -664,7 +681,6 @@ void pw_tick(void* _gui)
     // xassert(default_language != NULL);
     // hb_buffer_set_language(buf, default_language);
 
-    size_t my_text_len = strlen(my_text);
     hb_buffer_add_utf8(buf, my_text, my_text_len, 0, my_text_len);
     // If we know the language:
     // hb_buffer_set_direction(buf, HB_DIRECTION_LTR);
@@ -696,69 +712,99 @@ void pw_tick(void* _gui)
     hb_font_destroy(font);
     hb_buffer_destroy(buf);
 
-#else  // !USE_HARFBUZZ
+#else // !USE_HARFBUZZ
 
-    // kb_text_shape
-    size_t Length = strlen(my_text);
+    kbts_cursor    Cursor    = {0};
+    kbts_direction Direction = KBTS_DIRECTION_NONE;
+    kbts_script    Script    = KBTS_SCRIPT_DONT_KNOW;
+    size_t         RunStart  = 0;
 
-    kbts_font* Font = &gui->kb_font;
-    // Make some glyphs
-    if (Length > gui->GlyphCapacity)
+    kbts_font*             Font          = &gui->kb_font;
+    kbts_shape_state*      Shape         = gui->kb_shape;
+    const FT_Size_Metrics* FtSizeMetrics = &gui->ft_face->size->metrics;
+
+    if (my_text_len > gui->CodepointCap)
     {
-        gui->Glyphs        = (kbts_glyph*)realloc(gui->Glyphs, sizeof(kbts_glyph) * Length);
-        gui->GlyphCapacity = Length;
+        gui->Codepoints   = xrealloc(gui->Codepoints, sizeof(*gui->Codepoints) * my_text_len);
+        gui->CodepointCap = my_text_len;
     }
-    uint32_t       GlyphCount = 0;
-    kbts_script    Script     = KBTS_SCRIPT_DONT_KNOW;
-    kbts_direction Direction  = KBTS_DIRECTION_NONE;
-    for (size_t StringAt = 0; StringAt < Length;)
+    if (my_text_len > gui->GlyphCap)
     {
-        kbts_decode Decode  = kbts_DecodeUtf8(my_text + StringAt, Length - StringAt);
+        gui->Glyphs   = xrealloc(gui->Glyphs, sizeof(kbts_glyph) * my_text_len);
+        gui->GlyphCap = my_text_len;
+    }
+
+    // Build codepoints array
+    size_t CodepointCount = 0;
+    for (size_t StringAt = 0; StringAt < my_text_len;)
+    {
+        kbts_decode Decode  = kbts_DecodeUtf8(my_text + StringAt, my_text_len - StringAt);
         StringAt           += Decode.SourceCharactersConsumed;
-        if (Decode.Valid)
+
+        gui->Codepoints[CodepointCount++] = Decode.Codepoint;
+    }
+
+    kbts_break_state BreakState;
+    kbts_BeginBreak(&BreakState, KBTS_DIRECTION_NONE, KBTS_JAPANESE_LINE_BREAK_STYLE_NORMAL);
+    int num_runs = 0;
+    for (size_t CodepointIndex = 0; CodepointIndex < CodepointCount; ++CodepointIndex)
+    {
+        kbts_BreakAddCodepoint(&BreakState, gui->Codepoints[CodepointIndex], 1, (CodepointIndex + 1) == CodepointCount);
+        kbts_break Break;
+        while (kbts_Break(&BreakState, &Break))
         {
-            kbts_glyph Glyph = kbts_CodepointToGlyph(Font, Decode.Codepoint);
-            // Easy script inference for simple cases. (This is similar to
-            // hb_buffer_guess_segment_properties.) If you have already segmented
-            // String with our API, you already have a script! So no need to pass it
-            // in that case. Only use this as a shorthand, when you are pretty sure
-            // String is a single script.
-            kbts_InferScript(&Direction, &Script, Glyph.Script);
-            gui->Glyphs[GlyphCount++] = Glyph;
+            if ((Break.Position > RunStart) &&
+                (Break.Flags & (KBTS_BREAK_FLAG_DIRECTION | KBTS_BREAK_FLAG_SCRIPT | KBTS_BREAK_FLAG_LINE_HARD)))
+            {
+                size_t RunLength = Break.Position - RunStart;
+
+                for (size_t j = 0;
+                     j < RunLength && (RunStart + j) < gui->GlyphCap && (RunStart + j) < gui->CodepointCap;
+                     ++j)
+                {
+                    gui->Glyphs[j] = kbts_CodepointToGlyph(Font, gui->Codepoints[RunStart + j]);
+                }
+
+                kbts_shape_config Config = kbts_ShapeConfig(Font, Script, KBTS_LANGUAGE_DONT_KNOW);
+
+                uint32_t       GlyphCount    = RunLength;
+                kbts_direction MainDirection = BreakState.MainDirection;
+                while (kbts_Shape(Shape, &Config, MainDirection, Direction, gui->Glyphs, &GlyphCount, gui->GlyphCap))
+                {
+                    gui->Glyphs = (kbts_glyph*)xrealloc(gui->Glyphs, sizeof(kbts_glyph) * Shape->RequiredGlyphCapacity);
+                    gui->GlyphCap = Shape->RequiredGlyphCapacity;
+                }
+
+                for (size_t GlyphIndex = 0; GlyphIndex < GlyphCount; ++GlyphIndex)
+                {
+                    kbts_glyph* Glyph = &gui->Glyphs[GlyphIndex];
+
+                    // Note, cursor is used to move the pen
+                    int X, Y;
+                    kbts_PositionGlyph(&Cursor, Glyph, &X, &Y);
+
+                    int glyph_x = ((X >> 6) * FtSizeMetrics->x_scale) >> 16;
+                    int glyph_y = ((Y >> 6) * FtSizeMetrics->y_scale) >> 16;
+                    draw_glyph(gui, Glyph->Id, pen_x + glyph_x, pen_y + glyph_y);
+                }
+
+                RunStart = Break.Position;
+            }
+
+            if (Break.Flags & KBTS_BREAK_FLAG_DIRECTION)
+            {
+                Direction = Break.Direction;
+                if (!Cursor.Direction)
+                    Cursor = kbts_Cursor(BreakState.MainDirection);
+            }
+
+            if (Break.Flags & KBTS_BREAK_FLAG_SCRIPT)
+            {
+                Script = Break.Script;
+            }
         }
     }
-    // Shape
-    kbts_shape_state* State = kbts_CreateShapeState(Font);
-    // A shape_config is immutable once created. You can freely share/hash it,
-    // etc.
-    kbts_shape_config Config = kbts_ShapeConfig(Font, Script, KBTS_LANGUAGE_DONT_KNOW);
-    while (kbts_Shape(State, &Config, Direction, Direction, gui->Glyphs, &GlyphCount, gui->GlyphCapacity))
-    {
-        gui->Glyphs        = realloc(gui->Glyphs, sizeof(kbts_glyph) * State->RequiredGlyphCapacity);
-        gui->GlyphCapacity = State->RequiredGlyphCapacity;
-    }
-    // Get final positions
-    kbts_cursor Cursor = kbts_Cursor(Direction);
 
-    // Move pen to centre of gui
-    const FT_Size_Metrics* FtSizeMetrics = &gui->ft_face->size->metrics;
-    for (size_t GlyphIndex = 0; GlyphIndex < GlyphCount; ++GlyphIndex)
-    {
-        int         X, Y;
-        kbts_glyph* glyph = &gui->Glyphs[GlyphIndex];
-        kbts_PositionGlyph(&Cursor, glyph, &X, &Y);
-
-        draw_glyph(gui, glyph->Id, pen_x, pen_y);
-
-        // pen_x += FT_MulFix(glyph->AdvanceX >> 6, FtSizeMetrics->x_scale);
-        // pen_y += FT_MulFix(glyph->AdvanceY >> 6, FtSizeMetrics->y_scale);
-        // pen_x += (glyph->AdvanceX * FtSizeMetrics->x_scale) >> 22;
-        // pen_y += (glyph->AdvanceY * FtSizeMetrics->y_scale) >> 22;
-        pen_x += ((glyph->AdvanceX >> 6) * FtSizeMetrics->x_scale) >> 16;
-        pen_y += ((glyph->AdvanceY >> 6) * FtSizeMetrics->y_scale) >> 16;
-    }
-
-    kbts_FreeShapeState(State);
 #endif // !USE_HARFBUZZ
 
     // IMG shader
