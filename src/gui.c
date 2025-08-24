@@ -490,14 +490,12 @@ void* pw_create_gui(void* _plugin, void* _pw)
                           {[ATTR_text_position].format  = SG_VERTEXFORMAT_FLOAT2,
                            [ATTR_text_texcoord0].format = SG_VERTEXFORMAT_SHORT2N}},
                  .colors[0] =
-                {.write_mask = SG_COLORMASK_RGBA,
+                {.write_mask = SG_COLORMASK_RGB,
                       .blend =
                           {
-                              .enabled          = true,
-                              .src_factor_rgb   = SG_BLENDFACTOR_ONE,
-                              .src_factor_alpha = SG_BLENDFACTOR_ONE,
-                              .dst_factor_rgb   = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
-                              .dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+                              .enabled        = true,
+                              .src_factor_rgb = SG_BLENDFACTOR_ONE,
+                              .dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_COLOR,
                      }},
                  .label = "img-pipeline"});
 
