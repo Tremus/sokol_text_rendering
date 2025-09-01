@@ -25,6 +25,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
+#include <img.glsl.h>
 #include <text.glsl.h>
 
 // #define USE_HARFBUZZ
@@ -64,7 +65,7 @@ bool load_image(const char* path, struct load_img_t* out)
 
     if (ok)
     {
-        stbi_set_flip_vertically_on_load(1);
+        // stbi_set_flip_vertically_on_load(1);
 
         int      x = 0, y = 0, comp = 0;
         stbi_uc* img_buf = stbi_load_from_memory(file_data, file_data_len, &x, &y, &comp, 4);
@@ -192,10 +193,16 @@ typedef struct GUI
     size_t CodepointCap;
 #endif
 
+    // Text pipeline
     sg_pipeline pip;
     sg_buffer   vbo;
     sg_buffer   ibo;
     sg_sampler  smp;
+
+    sg_pipeline img_pip;
+    sg_image    img_girl_jacket;
+    sg_sampler  sampler_linear;
+    sg_sampler  sampler_nearest;
 
     // struct load_img_t brain;
     size_t   num_vertices;
@@ -498,14 +505,6 @@ void* pw_create_gui(void* _plugin, void* _pw)
                               .dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_COLOR,
                      }},
                  .label = "img-pipeline"});
-
-        // a sampler object
-        gui->smp = sg_make_sampler(&(sg_sampler_desc){
-            .min_filter = SG_FILTER_NEAREST,
-            .mag_filter = SG_FILTER_NEAREST,
-            .wrap_u     = SG_WRAP_CLAMP_TO_EDGE,
-            .wrap_v     = SG_WRAP_CLAMP_TO_EDGE,
-        });
     }
 
     int err = FT_Init_FreeType(&gui->ft_lib);
@@ -514,8 +513,8 @@ void* pw_create_gui(void* _plugin, void* _pw)
     // const char* font_path = "C:\\Windows\\Fonts\\segoeui.ttf";
     // const char* font_path = "C:\\Windows\\Fonts\\segoeuib.ttf"; // bold
     // const char* font_path = "C:\\Windows\\Fonts\\seguisb.ttf"; // semibold
-    // const char* font_path = SRC_DIR XFILES_DIR_STR "assets\\EBGaramond-Regular.ttf";
-    const char* font_path = SRC_DIR XFILES_DIR_STR "assets\\NotoSansHebrew-Regular.ttf";
+    // const char* font_path = SRC_DIR XFILES_DIR_STR "assets" XFILES_DIR_STR "EBGaramond-Regular.ttf";
+    const char* font_path = SRC_DIR XFILES_DIR_STR "assets" XFILES_DIR_STR "NotoSansHebrew-Regular.ttf";
     xassert(xfiles_exists(font_path));
     err = FT_New_Face(gui->ft_lib, font_path, 0, &gui->ft_face);
     xassert(!err);
@@ -546,23 +545,37 @@ void* pw_create_gui(void* _plugin, void* _pw)
         raster_glyph(gui, glyph_index);
     }
 
-    // img
-    // {
-    //     char path[1024];
-    //     xfiles_get_user_directory(path, sizeof(path), XFILES_USER_DIRECTORY_DESKTOP);
-    //     int         len = strlen(path);
-    //     const char* cat = XFILES_DIR_STR "brain.jpg";
-    //     snprintf(path + len, sizeof(path) - len, "%s", cat);
-
-    //     bool ok = load_image(path, &gui->brain);
-    //     xassert(ok);
-    // }
-
 #ifndef USE_HARFBUZZ
     // Open a font file
     gui->kb_font  = kbts_FontFromFile(font_path);
     gui->kb_shape = kbts_CreateShapeState(&gui->kb_font);
 #endif
+
+    gui->img_pip         = sg_make_pipeline(&(sg_pipeline_desc){
+                .shader = sg_make_shader(texread_shader_desc(sg_query_backend())),
+    });
+    gui->sampler_linear  = sg_make_sampler(&(sg_sampler_desc){
+         .min_filter    = SG_FILTER_LINEAR,
+         .mag_filter    = SG_FILTER_LINEAR,
+         .mipmap_filter = SG_FILTER_LINEAR,
+         .wrap_u        = SG_WRAP_CLAMP_TO_EDGE,
+         .wrap_v        = SG_WRAP_CLAMP_TO_EDGE,
+    });
+    gui->sampler_nearest = sg_make_sampler(&(sg_sampler_desc){
+        .min_filter    = SG_FILTER_NEAREST,
+        .mag_filter    = SG_FILTER_NEAREST,
+        .mipmap_filter = SG_FILTER_NEAREST,
+        .wrap_u        = SG_WRAP_CLAMP_TO_EDGE,
+        .wrap_v        = SG_WRAP_CLAMP_TO_EDGE,
+    });
+
+    // Load image
+    // src=https://www.w3schools.com/tags//tryit.asp?filename=tryhtml_image_test
+    const char*       img_path = SRC_DIR XFILES_DIR_STR "assets" XFILES_DIR_STR "img_girl.jpg";
+    struct load_img_t img_girl;
+    bool              ok = load_image(img_path, &img_girl);
+    if (ok)
+        gui->img_girl_jacket = img_girl.img;
 
     return gui;
 }
@@ -650,6 +663,13 @@ void pw_tick(void* _gui)
         sg_set_global(gui->sg);
         sg_begin_pass(&(sg_pass){.action = pass_action, .swapchain = swapchain});
     }
+
+    sg_apply_pipeline(gui->img_pip);
+    sg_apply_bindings(&(sg_bindings){
+        .images[0]   = gui->img_girl_jacket,
+        .samplers[0] = gui->sampler_nearest,
+    });
+    sg_draw(0, 3, 1);
 
     // https://utf8everywhere.org/
     // const char* my_text = "abc";
@@ -832,7 +852,7 @@ void pw_tick(void* _gui)
         bind.vertex_buffers[0]      = gui->vbo;
         bind.index_buffer           = gui->ibo;
         bind.images[IMG_text_tex]   = atlas->img;
-        bind.samplers[SMP_text_smp] = gui->smp;
+        bind.samplers[SMP_text_smp] = gui->sampler_nearest;
 
         sg_apply_bindings(&bind);
         sg_draw(0, gui->num_indices, 1);
@@ -840,5 +860,5 @@ void pw_tick(void* _gui)
 
     sg_end_pass();
     sg_commit();
-    sg_set_global(gui->sg);
+    sg_set_global(NULL);
 }
