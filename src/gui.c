@@ -99,6 +99,17 @@ typedef struct
     int16_t u, v;
 } vertex_t;
 
+// https://utf8everywhere.org/
+// static const char* MY_TEXT = "abc";
+// static const char* MY_TEXT = "Sphinx of black quartz, judge my vow";
+// static const char* MY_TEXT = "AV. .W.V.";
+// static const char* MY_TEXT = "UTF8 Приве́т नमस्ते שָׁלוֹם 🐨";
+// static const char* MY_TEXT = "UTF8 Приве́т नमस्ते שָׁלוֹם";
+// static const char* MY_TEXT = "שָׁלוֹם";
+// static const char* MY_TEXT = "UTF8 Приве́т";
+// NOTE: in order to correctly shape this text with kbts, you must explicitly say the text is LTR direction
+static const char* MY_TEXT = "-48.37dB + 10";
+
 enum
 {
     // MAX_SQUARES  = 1024 * 10 + 512 + 128 + 32 + 8 + 2,
@@ -112,7 +123,9 @@ enum
     ATLAS_ROW_STRIDE  = ATLAS_WIDTH * 4,
     ATLAS_INT16_SHIFT = 8,
 
-    FONT_SIZE        = 12,
+    // Sans-serif style typefaces become hard to read below a font size of 7px
+    // 8px should be the minimum
+    FONT_SIZE        = 14,
     RECTPACK_PADDING = 1,
 };
 _Static_assert(MAX_INDICES < UINT16_MAX, "UINT16 Overflow");
@@ -664,22 +677,14 @@ void pw_tick(void* _gui)
         sg_begin_pass(&(sg_pass){.action = pass_action, .swapchain = swapchain});
     }
 
-    sg_apply_pipeline(gui->img_pip);
-    sg_apply_bindings(&(sg_bindings){
-        .images[0]   = gui->img_girl_jacket,
-        .samplers[0] = gui->sampler_nearest,
-    });
-    sg_draw(0, 3, 1);
+    // sg_apply_pipeline(gui->img_pip);
+    // sg_apply_bindings(&(sg_bindings){
+    //     .images[0]   = gui->img_girl_jacket,
+    //     .samplers[0] = gui->sampler_nearest,
+    // });
+    // sg_draw(0, 3, 1);
 
-    // https://utf8everywhere.org/
-    // const char* my_text = "abc";
-    // const char* my_text = "Sphinx of black quartz, judge my vow";
-    // const char* my_text = "AV. .W.V.";
-    const char* my_text = "UTF8 Приве́т नमस्ते שָׁלוֹם 🐨";
-    // const char* my_text = "UTF8 Приве́т नमस्ते שָׁלוֹם";
-    // const char* my_text = "שָׁלוֹם";
-    // const char* my_text = "UTF8 Приве́т";
-    size_t my_text_len = strlen(my_text);
+    size_t my_text_len = strlen(MY_TEXT);
 
     int max_font_height_pixels = (gui->ft_face->size->metrics.ascender - gui->ft_face->size->metrics.descender) >> 6;
 
@@ -693,13 +698,13 @@ void pw_tick(void* _gui)
     pen_y -= FONT_SIZE / 2;
 
 // Harfbuzz
-#ifdef USE_HARFBUZZ
+#if defined(USE_HARFBUZZ)
     hb_buffer_t* buf = hb_buffer_create();
     // hb_language_t default_language = hb_language_get_default();
     // xassert(default_language != NULL);
     // hb_buffer_set_language(buf, default_language);
 
-    hb_buffer_add_utf8(buf, my_text, my_text_len, 0, my_text_len);
+    hb_buffer_add_utf8(buf, MY_TEXT, my_text_len, 0, my_text_len);
     // If we know the language:
     // hb_buffer_set_direction(buf, HB_DIRECTION_LTR);
     // hb_buffer_set_script(buf, HB_SCRIPT_LATIN);
@@ -729,9 +734,9 @@ void pw_tick(void* _gui)
 
     hb_font_destroy(font);
     hb_buffer_destroy(buf);
+#endif // USE_HARFBUZZ
 
-#else // !USE_HARFBUZZ
-
+#if !defined(USE_HARFBUZZ)
     kbts_cursor    Cursor    = {0};
     kbts_direction Direction = KBTS_DIRECTION_NONE;
     kbts_script    Script    = KBTS_SCRIPT_DONT_KNOW;
@@ -756,14 +761,14 @@ void pw_tick(void* _gui)
     size_t CodepointCount = 0;
     for (size_t StringAt = 0; StringAt < my_text_len;)
     {
-        kbts_decode Decode  = kbts_DecodeUtf8(my_text + StringAt, my_text_len - StringAt);
+        kbts_decode Decode  = kbts_DecodeUtf8(MY_TEXT + StringAt, my_text_len - StringAt);
         StringAt           += Decode.SourceCharactersConsumed;
 
         gui->Codepoints[CodepointCount++] = Decode.Codepoint;
     }
 
     kbts_break_state BreakState;
-    kbts_BeginBreak(&BreakState, KBTS_DIRECTION_NONE, KBTS_JAPANESE_LINE_BREAK_STYLE_NORMAL);
+    kbts_BeginBreak(&BreakState, KBTS_DIRECTION_LTR, KBTS_JAPANESE_LINE_BREAK_STYLE_NORMAL);
     int num_runs = 0;
     for (size_t CodepointIndex = 0; CodepointIndex < CodepointCount; ++CodepointIndex)
     {
