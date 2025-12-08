@@ -78,7 +78,7 @@ bool load_image(const char* path, struct load_img_t* out)
                 .height       = y,
                 .pixel_format = SG_PIXELFORMAT_RGBA8,
 
-                .data.subimage[0][0] = {
+                .data.mip_levels[0] = {
                     .ptr  = img_buf,
                     .size = x * y * 4,
                 }});
@@ -125,7 +125,7 @@ enum
 
     // Sans-serif style typefaces become hard to read below a font size of 7px
     // 8px should be the minimum
-    FONT_SIZE        = 14,
+    FONT_SIZE        = 12,
     RECTPACK_PADDING = 1,
 };
 _Static_assert(MAX_INDICES < UINT16_MAX, "UINT16 Overflow");
@@ -150,28 +150,29 @@ typedef struct atlas_rect_t
     int pen_offset_x;
     int pen_offset_y;
 
-    uint8_t  x, y, w, h;
-    sg_image atlas;
+    uint8_t x, y, w, h;
+    sg_view img_view;
 } atlas_rect;
 _Static_assert(ATLAS_WIDTH <= UINT8_MAX + 1, "");
 
-typedef struct glyph_atlas_t
+typedef struct glyph_atlas
 {
-    sg_image img;
-    bool     dirty;
-    bool     full;
+    sg_view img_view;
+    bool    dirty;
+    bool    full;
 } glyph_atlas;
 
 glyph_atlas glyph_atlas_new()
 {
-    glyph_atlas atlas = {
-        .img = sg_make_image(&(sg_image_desc){
-            .width                = ATLAS_WIDTH,
-            .height               = ATLAS_HEIGHT,
-            .pixel_format         = SG_PIXELFORMAT_RGBA8,
-            .usage.dynamic_update = true,
-        })};
-    xassert(atlas.img.id);
+    sg_image img = sg_make_image(&(sg_image_desc){
+        .width                = ATLAS_WIDTH,
+        .height               = ATLAS_HEIGHT,
+        .pixel_format         = SG_PIXELFORMAT_RGBA8,
+        .usage.dynamic_update = true,
+    });
+    xassert(img.id);
+    glyph_atlas atlas = {.img_view = sg_make_view(&(sg_view_desc){.texture.image = img})};
+    xassert(atlas.img_view.id);
     return atlas;
 }
 
@@ -196,8 +197,8 @@ typedef struct GUI
     FT_Face    ft_face;
 
 #ifndef USE_HARFBUZZ
-    kbts_font         kb_font;
-    kbts_shape_state* kb_shape;
+    // kbts_font           kb_font;
+    kbts_shape_context* kb_context;
 
     kbts_glyph* Glyphs;
     uint32_t    GlyphCap;
@@ -253,13 +254,11 @@ int raster_glyph(GUI* gui, uint32_t glyph_index)
         if (num_packed == 0) // atlas is full
         {
             atlas->full = true;
+
+            sg_view_desc view_desc = sg_query_view_desc(atlas->img_view);
             sg_update_image(
-                atlas->img,
-                &(sg_image_data){
-                    .subimage[0][0] = {
-                        .ptr  = gui->current_atlas.img_data,
-                        .size = ATLAS_HEIGHT * ATLAS_ROW_STRIDE,
-                    }});
+                view_desc.texture.image,
+                &(sg_image_data){.mip_levels[0] = {gui->current_atlas.img_data, ATLAS_HEIGHT * ATLAS_ROW_STRIDE}});
             atlas->dirty = false;
 
             // Clear rectpack
@@ -294,7 +293,7 @@ int raster_glyph(GUI* gui, uint32_t glyph_index)
             arect.y                = rect.y;
             arect.w                = width_pixels;
             arect.h                = bmp->rows;
-            arect.atlas            = atlas->img;
+            arect.img_view         = atlas->img_view;
             xassert(arect.x + arect.w <= ATLAS_WIDTH);
             xassert(arect.y + arect.h <= ATLAS_HEIGHT);
 
@@ -523,11 +522,12 @@ void* pw_create_gui(void* _plugin, void* _pw)
     int err = FT_Init_FreeType(&gui->ft_lib);
     xassert(!err);
     // const char* font_path = "C:\\Windows\\Fonts\\arialbd.ttf";
+    const char* font_path = "C:\\Windows\\Fonts\\seguisb.ttf";
     // const char* font_path = "C:\\Windows\\Fonts\\segoeui.ttf";
     // const char* font_path = "C:\\Windows\\Fonts\\segoeuib.ttf"; // bold
     // const char* font_path = "C:\\Windows\\Fonts\\seguisb.ttf"; // semibold
     // const char* font_path = SRC_DIR XFILES_DIR_STR "assets" XFILES_DIR_STR "EBGaramond-Regular.ttf";
-    const char* font_path = SRC_DIR XFILES_DIR_STR "assets" XFILES_DIR_STR "NotoSansHebrew-Regular.ttf";
+    // const char* font_path = SRC_DIR XFILES_DIR_STR "assets" XFILES_DIR_STR "NotoSansHebrew-Regular.ttf";
     xassert(xfiles_exists(font_path));
     err = FT_New_Face(gui->ft_lib, font_path, 0, &gui->ft_face);
     xassert(!err);
@@ -560,8 +560,9 @@ void* pw_create_gui(void* _plugin, void* _pw)
 
 #ifndef USE_HARFBUZZ
     // Open a font file
-    gui->kb_font  = kbts_FontFromFile(font_path);
-    gui->kb_shape = kbts_CreateShapeState(&gui->kb_font);
+    // gui->kb_font  = kbts_FontFromFile(font_path);
+    gui->kb_context = kbts_CreateShapeContext(0, 0);
+    kbts_ShapePushFontFromFile(gui->kb_context, font_path, 0);
 #endif
 
     gui->img_pip         = sg_make_pipeline(&(sg_pipeline_desc){
@@ -611,8 +612,8 @@ void pw_destroy_gui(void* _gui)
     xassert(!error);
 
 #ifndef USE_HARFBUZZ
-    kbts_FreeFont(&gui->kb_font);
-    kbts_FreeShapeState(gui->kb_shape);
+    // kbts_FreeFont(&gui->kb_font);
+    kbts_DestroyShapeContext(gui->kb_context);
     xfree(gui->Codepoints);
     xfree(gui->Glyphs);
 #endif
@@ -737,94 +738,125 @@ void pw_tick(void* _gui)
 #endif // USE_HARFBUZZ
 
 #if !defined(USE_HARFBUZZ)
-    kbts_cursor    Cursor    = {0};
-    kbts_direction Direction = KBTS_DIRECTION_NONE;
-    kbts_script    Script    = KBTS_SCRIPT_DONT_KNOW;
-    size_t         RunStart  = 0;
+    /*
+        kbts_cursor    Cursor    = {0};
+        kbts_direction Direction = KBTS_DIRECTION_NONE;
+        kbts_script    Script    = KBTS_SCRIPT_DONT_KNOW;
+        size_t         RunStart  = 0;
 
-    kbts_font*             Font          = &gui->kb_font;
-    kbts_shape_state*      Shape         = gui->kb_shape;
+        kbts_font*             Font          = &gui->kb_font;
+        kbts_shape_state*      Shape         = gui->kb_shape;
+        const FT_Size_Metrics* FtSizeMetrics = &gui->ft_face->size->metrics;
+
+        if (my_text_len > gui->CodepointCap)
+        {
+            gui->Codepoints   = xrealloc(gui->Codepoints, sizeof(*gui->Codepoints) * my_text_len);
+            gui->CodepointCap = my_text_len;
+        }
+        if (my_text_len > gui->GlyphCap)
+        {
+            gui->Glyphs   = xrealloc(gui->Glyphs, sizeof(kbts_glyph) * my_text_len);
+            gui->GlyphCap = my_text_len;
+        }
+
+        // Build codepoints array
+        size_t CodepointCount = 0;
+        for (size_t StringAt = 0; StringAt < my_text_len;)
+        {
+            kbts_decode Decode  = kbts_DecodeUtf8(MY_TEXT + StringAt, my_text_len - StringAt);
+            StringAt           += Decode.SourceCharactersConsumed;
+
+            gui->Codepoints[CodepointCount++] = Decode.Codepoint;
+        }
+
+        kbts_break_state BreakState;
+        kbts_BeginBreak(&BreakState, KBTS_DIRECTION_LTR, KBTS_JAPANESE_LINE_BREAK_STYLE_NORMAL);
+        int num_runs = 0;
+        for (size_t CodepointIndex = 0; CodepointIndex < CodepointCount; ++CodepointIndex)
+        {
+            kbts_BreakAddCodepoint(&BreakState, gui->Codepoints[CodepointIndex], 1, (CodepointIndex + 1) ==
+       CodepointCount); kbts_break Break; while (kbts_Break(&BreakState, &Break))
+            {
+                if ((Break.Position > RunStart) &&
+                    (Break.Flags & (KBTS_BREAK_FLAG_DIRECTION | KBTS_BREAK_FLAG_SCRIPT | KBTS_BREAK_FLAG_LINE_HARD)))
+                {
+                    size_t RunLength = Break.Position - RunStart;
+
+                    for (size_t j = 0;
+                         j < RunLength && (RunStart + j) < gui->GlyphCap && (RunStart + j) < gui->CodepointCap;
+                         ++j)
+                    {
+                        gui->Glyphs[j] = kbts_CodepointToGlyph(Font, gui->Codepoints[RunStart + j]);
+                    }
+
+                    kbts_shape_config Config = kbts_ShapeConfig(Font, Script, KBTS_LANGUAGE_DONT_KNOW);
+
+                    uint32_t       GlyphCount    = RunLength;
+                    kbts_direction MainDirection = BreakState.MainDirection;
+                    while (kbts_Shape(Shape, &Config, MainDirection, Direction, gui->Glyphs, &GlyphCount,
+       gui->GlyphCap))
+                    {
+                        gui->Glyphs = (kbts_glyph*)xrealloc(gui->Glyphs, sizeof(kbts_glyph) *
+       Shape->RequiredGlyphCapacity); gui->GlyphCap = Shape->RequiredGlyphCapacity;
+                    }
+
+                    for (size_t GlyphIndex = 0; GlyphIndex < GlyphCount; ++GlyphIndex)
+                    {
+                        kbts_glyph* Glyph = &gui->Glyphs[GlyphIndex];
+
+                        // Note, cursor is used to move the pen
+                        int X, Y;
+                        kbts_PositionGlyph(&Cursor, Glyph, &X, &Y);
+
+                        int glyph_x = ((X >> 6) * FtSizeMetrics->x_scale) >> 16;
+                        int glyph_y = ((Y >> 6) * FtSizeMetrics->y_scale) >> 16;
+                        draw_glyph(gui, Glyph->Id, pen_x + glyph_x, pen_y + glyph_y);
+                    }
+
+                    RunStart = Break.Position;
+                }
+
+                if (Break.Flags & KBTS_BREAK_FLAG_DIRECTION)
+                {
+                    Direction = Break.Direction;
+                    if (!Cursor.Direction)
+                        Cursor = kbts_Cursor(BreakState.MainDirection);
+                }
+
+                if (Break.Flags & KBTS_BREAK_FLAG_SCRIPT)
+                {
+                    Script = Break.Script;
+                }
+            }
+        }
+    */
+    kbts_ShapeBegin(gui->kb_context, KBTS_DIRECTION_DONT_KNOW, KBTS_LANGUAGE_DONT_KNOW);
+    kbts_ShapeUtf8(
+        gui->kb_context,
+        "Let's shape something!",
+        sizeof("Let's shape something!") - 1,
+        KBTS_USER_ID_GENERATION_MODE_CODEPOINT_INDEX);
+    kbts_ShapeEnd(gui->kb_context);
+
     const FT_Size_Metrics* FtSizeMetrics = &gui->ft_face->size->metrics;
 
-    if (my_text_len > gui->CodepointCap)
+    // Layout runs naively left to right.
+    kbts_run Run;
+    int      CursorX = 0, CursorY = 0;
+    while (kbts_ShapeRun(gui->kb_context, &Run))
     {
-        gui->Codepoints   = xrealloc(gui->Codepoints, sizeof(*gui->Codepoints) * my_text_len);
-        gui->CodepointCap = my_text_len;
-    }
-    if (my_text_len > gui->GlyphCap)
-    {
-        gui->Glyphs   = xrealloc(gui->Glyphs, sizeof(kbts_glyph) * my_text_len);
-        gui->GlyphCap = my_text_len;
-    }
-
-    // Build codepoints array
-    size_t CodepointCount = 0;
-    for (size_t StringAt = 0; StringAt < my_text_len;)
-    {
-        kbts_decode Decode  = kbts_DecodeUtf8(MY_TEXT + StringAt, my_text_len - StringAt);
-        StringAt           += Decode.SourceCharactersConsumed;
-
-        gui->Codepoints[CodepointCount++] = Decode.Codepoint;
-    }
-
-    kbts_break_state BreakState;
-    kbts_BeginBreak(&BreakState, KBTS_DIRECTION_LTR, KBTS_JAPANESE_LINE_BREAK_STYLE_NORMAL);
-    int num_runs = 0;
-    for (size_t CodepointIndex = 0; CodepointIndex < CodepointCount; ++CodepointIndex)
-    {
-        kbts_BreakAddCodepoint(&BreakState, gui->Codepoints[CodepointIndex], 1, (CodepointIndex + 1) == CodepointCount);
-        kbts_break Break;
-        while (kbts_Break(&BreakState, &Break))
+        kbts_glyph* Glyph;
+        while (kbts_GlyphIteratorNext(&Run.Glyphs, &Glyph))
         {
-            if ((Break.Position > RunStart) &&
-                (Break.Flags & (KBTS_BREAK_FLAG_DIRECTION | KBTS_BREAK_FLAG_SCRIPT | KBTS_BREAK_FLAG_LINE_HARD)))
-            {
-                size_t RunLength = Break.Position - RunStart;
+            int GlyphX = CursorX + Glyph->OffsetX;
+            int GlyphY = CursorY + Glyph->OffsetY;
 
-                for (size_t j = 0;
-                     j < RunLength && (RunStart + j) < gui->GlyphCap && (RunStart + j) < gui->CodepointCap;
-                     ++j)
-                {
-                    gui->Glyphs[j] = kbts_CodepointToGlyph(Font, gui->Codepoints[RunStart + j]);
-                }
+            int glyph_x = ((GlyphX >> 6) * FtSizeMetrics->x_scale) >> 16;
+            int glyph_y = ((GlyphY >> 6) * FtSizeMetrics->y_scale) >> 16;
+            draw_glyph(gui, Glyph->Id, pen_x + glyph_x, pen_y + glyph_y);
 
-                kbts_shape_config Config = kbts_ShapeConfig(Font, Script, KBTS_LANGUAGE_DONT_KNOW);
-
-                uint32_t       GlyphCount    = RunLength;
-                kbts_direction MainDirection = BreakState.MainDirection;
-                while (kbts_Shape(Shape, &Config, MainDirection, Direction, gui->Glyphs, &GlyphCount, gui->GlyphCap))
-                {
-                    gui->Glyphs = (kbts_glyph*)xrealloc(gui->Glyphs, sizeof(kbts_glyph) * Shape->RequiredGlyphCapacity);
-                    gui->GlyphCap = Shape->RequiredGlyphCapacity;
-                }
-
-                for (size_t GlyphIndex = 0; GlyphIndex < GlyphCount; ++GlyphIndex)
-                {
-                    kbts_glyph* Glyph = &gui->Glyphs[GlyphIndex];
-
-                    // Note, cursor is used to move the pen
-                    int X, Y;
-                    kbts_PositionGlyph(&Cursor, Glyph, &X, &Y);
-
-                    int glyph_x = ((X >> 6) * FtSizeMetrics->x_scale) >> 16;
-                    int glyph_y = ((Y >> 6) * FtSizeMetrics->y_scale) >> 16;
-                    draw_glyph(gui, Glyph->Id, pen_x + glyph_x, pen_y + glyph_y);
-                }
-
-                RunStart = Break.Position;
-            }
-
-            if (Break.Flags & KBTS_BREAK_FLAG_DIRECTION)
-            {
-                Direction = Break.Direction;
-                if (!Cursor.Direction)
-                    Cursor = kbts_Cursor(BreakState.MainDirection);
-            }
-
-            if (Break.Flags & KBTS_BREAK_FLAG_SCRIPT)
-            {
-                Script = Break.Script;
-            }
+            CursorX += Glyph->AdvanceX;
+            CursorY += Glyph->AdvanceY;
         }
     }
 
@@ -836,10 +868,11 @@ void pw_tick(void* _gui)
         glyph_atlas* atlas = gui->glyph_atlases + gui->current_atlas.idx;
         if (atlas->dirty)
         {
+            sg_view_desc view_desc = sg_query_view_desc(atlas->img_view);
             sg_update_image(
-                atlas->img,
+                view_desc.texture.image,
                 &(sg_image_data){
-                    .subimage[0][0] = {
+                    .mip_levels[0] = {
                         .ptr  = gui->current_atlas.img_data,
                         .size = ATLAS_HEIGHT * ATLAS_ROW_STRIDE,
                     }});
@@ -856,7 +889,7 @@ void pw_tick(void* _gui)
         sg_bindings bind            = {0};
         bind.vertex_buffers[0]      = gui->vbo;
         bind.index_buffer           = gui->ibo;
-        bind.images[IMG_text_tex]   = atlas->img;
+        bind.views[VIEW_text_tex]   = atlas->img_view;
         bind.samplers[SMP_text_smp] = gui->sampler_nearest;
 
         sg_apply_bindings(&bind);
