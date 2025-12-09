@@ -103,12 +103,14 @@ typedef struct
 // static const char* MY_TEXT = "abc";
 // static const char* MY_TEXT = "Sphinx of black quartz, judge my vow";
 // static const char* MY_TEXT = "AV. .W.V.";
-// static const char* MY_TEXT = "UTF8 Приве́т नमस्ते שָׁלוֹם 🐨";
+// This used to display correctly in my IDE (VSCode) but it appears to be broken. kb_text_shape v1 couldn't properly
+// segment the text and struggled to correctly position the hebrew glyphs. v2.0 appears to be perfect! Hoorah
+static const char* MY_TEXT = "Приве́т नमस्ते שָׁלוֹם  wow 🐨";
 // static const char* MY_TEXT = "UTF8 Приве́т नमस्ते שָׁלוֹם";
 // static const char* MY_TEXT = "שָׁלוֹם";
 // static const char* MY_TEXT = "UTF8 Приве́т";
 // NOTE: in order to correctly shape this text with kbts, you must explicitly say the text is LTR direction
-static const char* MY_TEXT = "-48.37dB + 10";
+// static const char* MY_TEXT = "-48.37dB + 10";
 
 enum
 {
@@ -738,104 +740,8 @@ void pw_tick(void* _gui)
 #endif // USE_HARFBUZZ
 
 #if !defined(USE_HARFBUZZ)
-    /*
-        kbts_cursor    Cursor    = {0};
-        kbts_direction Direction = KBTS_DIRECTION_NONE;
-        kbts_script    Script    = KBTS_SCRIPT_DONT_KNOW;
-        size_t         RunStart  = 0;
-
-        kbts_font*             Font          = &gui->kb_font;
-        kbts_shape_state*      Shape         = gui->kb_shape;
-        const FT_Size_Metrics* FtSizeMetrics = &gui->ft_face->size->metrics;
-
-        if (my_text_len > gui->CodepointCap)
-        {
-            gui->Codepoints   = xrealloc(gui->Codepoints, sizeof(*gui->Codepoints) * my_text_len);
-            gui->CodepointCap = my_text_len;
-        }
-        if (my_text_len > gui->GlyphCap)
-        {
-            gui->Glyphs   = xrealloc(gui->Glyphs, sizeof(kbts_glyph) * my_text_len);
-            gui->GlyphCap = my_text_len;
-        }
-
-        // Build codepoints array
-        size_t CodepointCount = 0;
-        for (size_t StringAt = 0; StringAt < my_text_len;)
-        {
-            kbts_decode Decode  = kbts_DecodeUtf8(MY_TEXT + StringAt, my_text_len - StringAt);
-            StringAt           += Decode.SourceCharactersConsumed;
-
-            gui->Codepoints[CodepointCount++] = Decode.Codepoint;
-        }
-
-        kbts_break_state BreakState;
-        kbts_BeginBreak(&BreakState, KBTS_DIRECTION_LTR, KBTS_JAPANESE_LINE_BREAK_STYLE_NORMAL);
-        int num_runs = 0;
-        for (size_t CodepointIndex = 0; CodepointIndex < CodepointCount; ++CodepointIndex)
-        {
-            kbts_BreakAddCodepoint(&BreakState, gui->Codepoints[CodepointIndex], 1, (CodepointIndex + 1) ==
-       CodepointCount); kbts_break Break; while (kbts_Break(&BreakState, &Break))
-            {
-                if ((Break.Position > RunStart) &&
-                    (Break.Flags & (KBTS_BREAK_FLAG_DIRECTION | KBTS_BREAK_FLAG_SCRIPT | KBTS_BREAK_FLAG_LINE_HARD)))
-                {
-                    size_t RunLength = Break.Position - RunStart;
-
-                    for (size_t j = 0;
-                         j < RunLength && (RunStart + j) < gui->GlyphCap && (RunStart + j) < gui->CodepointCap;
-                         ++j)
-                    {
-                        gui->Glyphs[j] = kbts_CodepointToGlyph(Font, gui->Codepoints[RunStart + j]);
-                    }
-
-                    kbts_shape_config Config = kbts_ShapeConfig(Font, Script, KBTS_LANGUAGE_DONT_KNOW);
-
-                    uint32_t       GlyphCount    = RunLength;
-                    kbts_direction MainDirection = BreakState.MainDirection;
-                    while (kbts_Shape(Shape, &Config, MainDirection, Direction, gui->Glyphs, &GlyphCount,
-       gui->GlyphCap))
-                    {
-                        gui->Glyphs = (kbts_glyph*)xrealloc(gui->Glyphs, sizeof(kbts_glyph) *
-       Shape->RequiredGlyphCapacity); gui->GlyphCap = Shape->RequiredGlyphCapacity;
-                    }
-
-                    for (size_t GlyphIndex = 0; GlyphIndex < GlyphCount; ++GlyphIndex)
-                    {
-                        kbts_glyph* Glyph = &gui->Glyphs[GlyphIndex];
-
-                        // Note, cursor is used to move the pen
-                        int X, Y;
-                        kbts_PositionGlyph(&Cursor, Glyph, &X, &Y);
-
-                        int glyph_x = ((X >> 6) * FtSizeMetrics->x_scale) >> 16;
-                        int glyph_y = ((Y >> 6) * FtSizeMetrics->y_scale) >> 16;
-                        draw_glyph(gui, Glyph->Id, pen_x + glyph_x, pen_y + glyph_y);
-                    }
-
-                    RunStart = Break.Position;
-                }
-
-                if (Break.Flags & KBTS_BREAK_FLAG_DIRECTION)
-                {
-                    Direction = Break.Direction;
-                    if (!Cursor.Direction)
-                        Cursor = kbts_Cursor(BreakState.MainDirection);
-                }
-
-                if (Break.Flags & KBTS_BREAK_FLAG_SCRIPT)
-                {
-                    Script = Break.Script;
-                }
-            }
-        }
-    */
     kbts_ShapeBegin(gui->kb_context, KBTS_DIRECTION_DONT_KNOW, KBTS_LANGUAGE_DONT_KNOW);
-    kbts_ShapeUtf8(
-        gui->kb_context,
-        "Let's shape something!",
-        sizeof("Let's shape something!") - 1,
-        KBTS_USER_ID_GENERATION_MODE_CODEPOINT_INDEX);
+    kbts_ShapeUtf8(gui->kb_context, MY_TEXT, my_text_len, KBTS_USER_ID_GENERATION_MODE_CODEPOINT_INDEX);
     kbts_ShapeEnd(gui->kb_context);
 
     const FT_Size_Metrics* FtSizeMetrics = &gui->ft_face->size->metrics;
