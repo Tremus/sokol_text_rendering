@@ -1,14 +1,4 @@
 #include "common.h"
-
-#if !defined(RASTER_STB_TRUETYPE) && !defined(RASTER_FREETYPE_SINGLECHANNEL) && !defined(RASTER_FREETYPE_MULTICHANNEL)
-// #define RASTER_STB_TRUETYPE
-// #define RASTER_FREETYPE_MULTICHANNEL
-#define RASTER_FREETYPE_SINGLECHANNEL
-#endif
-#if defined(RASTER_FREETYPE_SINGLECHANNEL) || defined(RASTER_FREETYPE_MULTICHANNEL)
-#define RASTER_FREETYPE
-#endif
-
 #include "plugin.h"
 
 #include <xhl/array.h>
@@ -26,6 +16,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if !defined(RASTER_STB_TRUETYPE) && !defined(RASTER_FREETYPE_SINGLECHANNEL) && !defined(RASTER_FREETYPE_MULTICHANNEL)
+// #define RASTER_STB_TRUETYPE
+// #define RASTER_FREETYPE_MULTICHANNEL
+#define RASTER_FREETYPE_SINGLECHANNEL
+#endif
+#if defined(RASTER_FREETYPE_SINGLECHANNEL) || defined(RASTER_FREETYPE_MULTICHANNEL)
+#define RASTER_FREETYPE
+#endif
 
 #if defined(RASTER_FREETYPE_SINGLECHANNEL) || defined(RASTER_FREETYPE_MULTICHANNEL)
 #include <ft2build.h>
@@ -87,7 +86,7 @@ enum
     PLATFORM_SG_PIXEL_FORMAT  = SG_PIXELFORMAT_R8,
 #endif
 
-    // TODO: make this state and not an enum
+// TODO: make this state and not an enum
 #if defined(__APPLE__)
     PLATFORM_BACKING_SCALE_FACTOR = 2,
 #else
@@ -100,7 +99,7 @@ enum
     MAX_VERTICES = MAX_SQUARES * 4,
     MAX_INDICES  = MAX_SQUARES * 6,
 
-    ATLAS_SIZE_SHIFT = 8,
+    ATLAS_SIZE_SHIFT  = 8,
     ATLAS_WIDTH       = (1 << ATLAS_SIZE_SHIFT),
     ATLAS_HEIGHT      = ATLAS_WIDTH,
     ATLAS_ROW_STRIDE  = ATLAS_WIDTH * PLATFORM_TEXTURE_CHANNELS,
@@ -388,7 +387,7 @@ int raster_glyph(GUI* gui, uint32_t glyph_index, int font_size)
     int ix0 = 0, iy0 = 0, ix1 = 0, iy1 = 0;
     // TODO: figure out what I should be using here...
     // TODO: figure out how to get rasterizer to match the same height as the text shaper
-    float scale_pixel_height = stbtt_ScaleForPixelHeight(&gui->fontinfo, font_size * PLATFORM_BACKING_SCALE_FACTOR);
+    float scale_pixel_height = stbtt_ScaleForPixelHeight(&gui->fontinfo, font_size * PLATFORM_BACKING_SCALE_FACTOR * 2);
     // float scale_emtopixels = stbtt_ScaleForMappingEmToPixels(&gui->fontinfo, font_size *
     // PLATFORM_BACKING_SCALE_FACTOR);
     float scale = scale_pixel_height;
@@ -471,7 +470,7 @@ int raster_glyph(GUI* gui, uint32_t glyph_index, int font_size)
 // TODO: use fallback fonts. This may require accepting utf32 codepoints to detect language
 const atlas_rect* get_glyph_rect(GUI* gui, uint32_t glyph_index, int font_size)
 {
-    const int   num_rects = xarr_len(gui->rects);
+    const int num_rects = xarr_len(gui->rects);
 
     const union atlas_rect_header header = {.glyphid = glyph_index, .font_size = font_size};
 
@@ -883,11 +882,11 @@ void pw_tick(void* _gui)
     int pen_y = 0;
 
 #if defined(RASTER_FREETYPE)
-    const FT_Size_Metrics* FtSizeMetrics = &gui->ft_face->size->metrics;
-    int                    x_scale       = FtSizeMetrics->x_scale;
-    int                    y_scale       = FtSizeMetrics->y_scale;
-    x_scale /= PLATFORM_BACKING_SCALE_FACTOR;
-    y_scale /= PLATFORM_BACKING_SCALE_FACTOR;
+    const FT_Size_Metrics* FtSizeMetrics  = &gui->ft_face->size->metrics;
+    int                    x_scale        = FtSizeMetrics->x_scale;
+    int                    y_scale        = FtSizeMetrics->y_scale;
+    x_scale                              /= PLATFORM_BACKING_SCALE_FACTOR;
+    y_scale                              /= PLATFORM_BACKING_SCALE_FACTOR;
 
     int max_font_height_pixels = (gui->ft_face->size->metrics.ascender - gui->ft_face->size->metrics.descender) >> 6;
     pen_y                      = max_font_height_pixels + (gui->ft_face->size->metrics.descender >> 6);
