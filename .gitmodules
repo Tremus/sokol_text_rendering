@@ -10,9 +10,6 @@
 [submodule "modules/freetype"]
 	path = modules/freetype
 	url = https://github.com/freetype/freetype
-[submodule "modules/harfbuzz"]
-	path = modules/harfbuzz
-	url = https://github.com/harfbuzz/harfbuzz
 [submodule "modules/wip_libs"]
 	path = modules/wip_libs
 	url = https://github.com/Tremus/wip_libs

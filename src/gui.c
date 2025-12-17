@@ -25,14 +25,7 @@
 #include <img.glsl.h>
 #include <text.glsl.h>
 
-// #define USE_HARFBUZZ
-// #ifdef USE_HARFBUZZ
-// #include <hb.h>
-
-// #include <hb-ft.h>
-// #else
 #include "kb_text_shape.h"
-// #endif // !USE_HARFBUZZ
 
 // TODO
 // Bind correct atlas img when drawing text
@@ -66,9 +59,9 @@ enum
     PLATFORM_TEXTURE_CHANNELS = 1,
     PLATFORM_SG_PIXEL_FORMAT  = SG_PIXELFORMAT_R8,
 #else
-    PLATFORM_RENDER_MODE      = FT_RENDER_MODE_LCD, // subpixel antialiasing, horizontal screen
-    PLATFORM_PIXEL_MODE       = FT_PIXEL_MODE_LCD,
-    PLATFORM_BITMAP_WIDTH     = 3,
+    PLATFORM_FT_RENDER_MODE   = FT_RENDER_MODE_LCD, // subpixel antialiasing, horizontal screen
+    PLATFORM_FT_PIXEL_MODE    = FT_PIXEL_MODE_LCD,
+    PLATFORM_FT_BITMAP_WIDTH  = 3,
     PLATFORM_TEXTURE_CHANNELS = 4,
     PLATFORM_SG_PIXEL_FORMAT  = SG_PIXELFORMAT_RGBA8,
 #endif
@@ -129,14 +122,15 @@ bool load_image(const char* path, struct load_img_t* out)
         ok = img_buf != NULL;
         if (ok)
         {
-            out->img = sg_make_image(&(sg_image_desc){.width        = x,
-                                                      .height       = y,
-                                                      .pixel_format = SG_PIXELFORMAT_RGBA8,
+            out->img = sg_make_image(&(sg_image_desc){
+                .width        = x,
+                .height       = y,
+                .pixel_format = SG_PIXELFORMAT_RGBA8,
 
-                                                      .data.mip_levels[0] = {
-                                                          .ptr  = img_buf,
-                                                          .size = x * y * 4,
-                                                      }});
+                .data.mip_levels[0] = {
+                    .ptr  = img_buf,
+                    .size = x * y * 4,
+                }});
             stbi_image_free(img_buf);
 
             out->width  = x;
@@ -213,16 +207,7 @@ typedef struct GUI
     FT_Library ft_lib;
     FT_Face    ft_face;
 
-#ifndef USE_HARFBUZZ
-    // kbts_font           kb_font;
     kbts_shape_context* kb_context;
-
-    kbts_glyph* Glyphs;
-    uint32_t    GlyphCap;
-
-    int*   Codepoints;
-    size_t CodepointCap;
-#endif
 
     // Text pipeline
     sg_pipeline text_pip;
@@ -518,15 +503,17 @@ void* pw_create_gui(void* _plugin, void* _pw)
 
     // img shader
     {
-        gui->text_vbo = sg_make_buffer(&(sg_buffer_desc){.usage.vertex_buffer = true,
-                                                         .usage.stream_update = true,
-                                                         .size                = sizeof(gui->vertices),
-                                                         .label               = "img-vertices"});
+        gui->text_vbo = sg_make_buffer(&(sg_buffer_desc){
+            .usage.vertex_buffer = true,
+            .usage.stream_update = true,
+            .size                = sizeof(gui->vertices),
+            .label               = "img-vertices"});
 
-        gui->text_ibo = sg_make_buffer(&(sg_buffer_desc){.usage.index_buffer  = true,
-                                                         .usage.stream_update = true,
-                                                         .size                = sizeof(gui->indices),
-                                                         .label               = "img-indices"});
+        gui->text_ibo = sg_make_buffer(&(sg_buffer_desc){
+            .usage.index_buffer  = true,
+            .usage.stream_update = true,
+            .size                = sizeof(gui->indices),
+            .label               = "img-indices"});
 
 #if defined(__APPLE__)
         sg_shader shd = sg_make_shader(text_singlechannel_shader_desc(sg_query_backend()));
@@ -544,21 +531,23 @@ void* pw_create_gui(void* _plugin, void* _pw)
         xstatic_assert(ATTR_text_singlechannel_position == ATTR_text_multichannel_position);
         xstatic_assert(ATTR_text_singlechannel_texcoord0 == ATTR_text_multichannel_texcoord0);
 #if defined(__APPLE__)
-        pip_desc.colors[0] = (sg_color_target_state){.write_mask = SG_COLORMASK_RGBA,
-                                                     .blend      = {
-                                                              .enabled          = true,
-                                                              .src_factor_rgb   = SG_BLENDFACTOR_SRC_ALPHA,
-                                                              .src_factor_alpha = SG_BLENDFACTOR_ONE,
-                                                              .dst_factor_rgb   = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
-                                                              .dst_factor_alpha = SG_BLENDFACTOR_ONE,
-                                                     }};
+        pip_desc.colors[0] = (sg_color_target_state){
+            .write_mask = SG_COLORMASK_RGBA,
+            .blend      = {
+                     .enabled          = true,
+                     .src_factor_rgb   = SG_BLENDFACTOR_SRC_ALPHA,
+                     .src_factor_alpha = SG_BLENDFACTOR_ONE,
+                     .dst_factor_rgb   = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+                     .dst_factor_alpha = SG_BLENDFACTOR_ONE,
+            }};
 #else
-        pip_desc.colors[0] = (sg_color_target_state){.write_mask = SG_COLORMASK_RGB,
-                                                     .blend      = {
-                                                              .enabled        = true,
-                                                              .src_factor_rgb = SG_BLENDFACTOR_ONE,
-                                                              .dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_COLOR,
-                                                     }};
+        pip_desc.colors[0] = (sg_color_target_state){
+            .write_mask = SG_COLORMASK_RGB,
+            .blend      = {
+                     .enabled        = true,
+                     .src_factor_rgb = SG_BLENDFACTOR_ONE,
+                     .dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_COLOR,
+            }};
 #endif
         gui->text_pip = sg_make_pipeline(&pip_desc);
     }
@@ -661,12 +650,7 @@ void pw_destroy_gui(void* _gui)
     error = FT_Done_FreeType(gui->ft_lib);
     xassert(!error);
 
-#ifndef USE_HARFBUZZ
-    // kbts_FreeFont(&gui->kb_font);
     kbts_DestroyShapeContext(gui->kb_context);
-    xfree(gui->Codepoints);
-    xfree(gui->Glyphs);
-#endif
 
     gui->plugin->gui = NULL;
     MY_FREE(gui);
@@ -748,46 +732,6 @@ void pw_tick(void* _gui)
     pen_y += gui_height / 2; // Vertical centre
     pen_y -= FONT_SIZE / 2;
 
-// Harfbuzz
-#if defined(USE_HARFBUZZ)
-    hb_buffer_t* buf = hb_buffer_create();
-    // hb_language_t default_language = hb_language_get_default();
-    // xassert(default_language != NULL);
-    // hb_buffer_set_language(buf, default_language);
-
-    hb_buffer_add_utf8(buf, MY_TEXT, my_text_len, 0, my_text_len);
-    // If we know the language:
-    // hb_buffer_set_direction(buf, HB_DIRECTION_LTR);
-    // hb_buffer_set_script(buf, HB_SCRIPT_LATIN);
-    // hb_buffer_set_language(buf, hb_language_from_string("en", -1));
-    // If we don't know the language:
-    hb_buffer_guess_segment_properties(buf);
-
-    hb_font_t* font = hb_ft_font_create(gui->ft_face, NULL);
-    hb_shape(font, buf, NULL, 0);
-
-    unsigned int         glyph_count;
-    hb_glyph_info_t*     glyph_info = hb_buffer_get_glyph_infos(buf, &glyph_count);
-    hb_glyph_position_t* glyph_pos  = hb_buffer_get_glyph_positions(buf, &glyph_count);
-
-    for (unsigned int i = 0; i < glyph_count; i++)
-    {
-        const hb_glyph_info_t*     info = glyph_info + i;
-        const hb_glyph_position_t* pos  = glyph_pos + i;
-
-        draw_glyph(gui, info->codepoint, pen_x, pen_y);
-
-        pen_x += pos->x_advance >> 6;
-        pen_y += pos->y_advance >> 6;
-
-        // break;
-    }
-
-    hb_font_destroy(font);
-    hb_buffer_destroy(buf);
-#endif // USE_HARFBUZZ
-
-#if !defined(USE_HARFBUZZ)
     kbts_ShapeBegin(gui->kb_context, KBTS_DIRECTION_DONT_KNOW, KBTS_LANGUAGE_DONT_KNOW);
     kbts_ShapeUtf8(gui->kb_context, MY_TEXT, my_text_len, KBTS_USER_ID_GENERATION_MODE_CODEPOINT_INDEX);
     kbts_ShapeEnd(gui->kb_context);
@@ -816,8 +760,6 @@ void pw_tick(void* _gui)
         }
     }
 
-#endif // !USE_HARFBUZZ
-
     // IMG shader
     if (gui->num_indices)
     {
@@ -827,10 +769,11 @@ void pw_tick(void* _gui)
             sg_view_desc view_desc = sg_query_view_desc(atlas->img_view);
             sg_update_image(
                 view_desc.texture.image,
-                &(sg_image_data){.mip_levels[0] = {
-                                     .ptr  = gui->current_atlas.img_data,
-                                     .size = ATLAS_HEIGHT * ATLAS_ROW_STRIDE,
-                                 }});
+                &(sg_image_data){
+                    .mip_levels[0] = {
+                        .ptr  = gui->current_atlas.img_data,
+                        .size = ATLAS_HEIGHT * ATLAS_ROW_STRIDE,
+                    }});
             atlas->dirty = false;
         }
 

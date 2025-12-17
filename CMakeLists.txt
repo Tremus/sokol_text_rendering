@@ -40,7 +40,6 @@ set(PLUGIN_INCLUDE
     modules/xhl/include
     modules/CPLUG/src/
     modules/sokol_gfx_multiinstance/
-    modules/harfbuzz/src
     modules/freetype/include
 
     src/libs
@@ -147,25 +146,10 @@ endif()
 
 add_library(freetype2 STATIC ${FREETYPE_SRC})
 
-target_include_directories(freetype2 PRIVATE ${FREETYPE_INCLUDE}
-    # modules/freetype/include
-    )
+target_include_directories(freetype2 PRIVATE ${FREETYPE_INCLUDE})
 target_compile_definitions(freetype2 PRIVATE ${FREETYPE_DEFINES})
 
-# ██╗  ██╗ █████╗ ██████╗ ███████╗██████╗ ██╗   ██╗███████╗███████╗
-# ██║  ██║██╔══██╗██╔══██╗██╔════╝██╔══██╗██║   ██║╚══███╔╝╚══███╔╝
-# ███████║███████║██████╔╝█████╗  ██████╔╝██║   ██║  ███╔╝   ███╔╝ 
-# ██╔══██║██╔══██║██╔══██╗██╔══╝  ██╔══██╗██║   ██║ ███╔╝   ███╔╝  
-# ██║  ██║██║  ██║██║  ██║██║     ██████╔╝╚██████╔╝███████╗███████╗
-# ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═════╝  ╚═════╝ ╚══════╝╚══════╝
-
-add_library(harfbuzz STATIC modules/harfbuzz/src/harfbuzz.cc) # unity build
-target_compile_definitions(harfbuzz PRIVATE HAVE_FREETYPE HB_NO_PRAGMA_GCC_DIAGNOSTIC_WARNING _CRT_SECURE_NO_WARNINGS)
-target_compile_options(harfbuzz PRIVATE -Wno-deprecated-declarations)
-target_link_libraries(harfbuzz PRIVATE freetype2)
-target_include_directories(harfbuzz PRIVATE modules/freetype/include)
-
-list(APPEND PLUGIN_LIBRARIES harfbuzz)
+list(APPEND PLUGIN_LIBRARIES freetype2)
 
 # ███████╗████████╗ █████╗ ███╗   ██╗██████╗  █████╗ ██╗      ██████╗ ███╗   ██╗███████╗
 # ██╔════╝╚══██╔══╝██╔══██╗████╗  ██║██╔══██╗██╔══██╗██║     ██╔═══██╗████╗  ██║██╔════╝
