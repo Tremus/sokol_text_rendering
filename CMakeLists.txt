@@ -182,28 +182,48 @@ target_compile_options(${PROJECT_NAME}_standalone PRIVATE ${PLUGIN_OPTIONS})
 # ██║  ██║╚██████╔╝   ██║   ██║  ██║███████╗███████╗╚██████╔╝██║  ██║██████╔╝
 # ╚═╝  ╚═╝ ╚═════╝    ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝
 
+if (CMAKE_BUILD_TYPE MATCHES Debug)
 set(HOTRELOAD_LIB_NAME ${PROJECT_NAME}_hotreload_lib)
-if (WIN32 AND CMAKE_BUILD_TYPE MATCHES Debug)
-    add_library(${HOTRELOAD_LIB_NAME} MODULE ${PLUGIN_SOURCES})
-    target_compile_definitions(${HOTRELOAD_LIB_NAME} PRIVATE ${PLUGIN_DEFINITIONS} CPLUG_SHARED CPLUG_BUILD_STANDALONE)
-    target_include_directories(${HOTRELOAD_LIB_NAME} PRIVATE ${PLUGIN_INCLUDE})
-    target_compile_options(${HOTRELOAD_LIB_NAME} PRIVATE ${PLUGIN_OPTIONS})
-    target_link_libraries(${HOTRELOAD_LIB_NAME} PRIVATE ${PLUGIN_LIBRARIES})
 
-    # Windows paths are complicated
-    string(REPLACE "/" "\\\\" SOURCE_DIR_WIN ${PROJECT_SOURCE_DIR})
-    string(REPLACE "/" "\\\\" BINARY_DIR_WIN ${CMAKE_BINARY_DIR})
+add_library(${HOTRELOAD_LIB_NAME} MODULE ${PLUGIN_SOURCES})
+target_compile_definitions(${HOTRELOAD_LIB_NAME} PRIVATE ${PLUGIN_DEFINITIONS} CPLUG_SHARED CPLUG_BUILD_STANDALONE)
+target_include_directories(${HOTRELOAD_LIB_NAME} PRIVATE ${PLUGIN_INCLUDE})
+target_compile_options(${HOTRELOAD_LIB_NAME} PRIVATE ${PLUGIN_OPTIONS})
 
+set(HOTRELOAD_WATCH_DIR "")
+set(HOTRELOAD_LIB_PATH "")
+set(HOTRELOAD_HOST_LIBS "")
+
+if (WIN32)
     add_executable(${PROJECT_NAME}_hotreload WIN32 modules/CPLUG/src/cplug_standalone_win.c)
-    target_compile_definitions(${PROJECT_NAME}_hotreload PRIVATE
-        HOTRELOAD_WATCH_DIR="${SOURCE_DIR_WIN}\\\\src"
-        HOTRELOAD_LIB_PATH="${BINARY_DIR_WIN}\\\\${CMAKE_BUILD_TYPE}\\\\${HOTRELOAD_LIB_NAME}.dll"
-        HOTRELOAD_BUILD_COMMAND="cmake --build ${BINARY_DIR_WIN} --config Debug --target ${HOTRELOAD_LIB_NAME}"
-        CPLUG_SHARED
-        )
-    target_compile_definitions(${PROJECT_NAME}_hotreload PRIVATE ${PLUGIN_DEFINITIONS} CPLUG_SHARED)
-    target_include_directories(${PROJECT_NAME}_hotreload PRIVATE ${PLUGIN_INCLUDE})
-    target_compile_options(${PROJECT_NAME}_hotreload PRIVATE ${PLUGIN_OPTIONS})
-    # Forces plugin to be built before the host
-    add_dependencies(${PROJECT_NAME}_hotreload ${HOTRELOAD_LIB_NAME})
-endif()
+    set(HOTRELOAD_WATCH_DIR "${SRC_DIR}\\\\src")
+    set(HOTRELOAD_LIB_PATH "${BIN_DIR}\\\\${CMAKE_BUILD_TYPE}\\\\${HOTRELOAD_LIB_NAME}.dll")
+endif()# WIN32
+if (APPLE)
+    add_executable(${PROJECT_NAME}_hotreload MACOSX_BUNDLE modules/CPLUG/src/cplug_standalone_osx.m)
+    file(TOUCH_NOCREATE "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}/${PROJECT_NAME}_hotreload.app/Contents/PkgInfo")
+    file(WRITE "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}/${PROJECT_NAME}_hotreload.app/Contents/PkgInfo" "APPL????")
+
+    set(HOTRELOAD_WATCH_DIR "${PROJECT_SOURCE_DIR}/src")
+    set(HOTRELOAD_LIB_PATH "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}/lib${HOTRELOAD_LIB_NAME}.so")
+    set(HOTRELOAD_HOST_LIBS "-framework Cocoa -framework CoreMIDI -framework CoreAudio -framework CoreServices")
+endif() # APPLE
+
+target_compile_definitions(${PROJECT_NAME}_hotreload PRIVATE
+    HOTRELOAD_WATCH_DIR="${HOTRELOAD_WATCH_DIR}"
+    HOTRELOAD_LIB_PATH="${HOTRELOAD_LIB_PATH}"
+    HOTRELOAD_BUILD_COMMAND="cmake --build ${BIN_DIR} --config Debug --target ${HOTRELOAD_LIB_NAME}"
+    CPLUG_SHARED
+    CPLUG_BUILD_STANDALONE
+    )
+target_compile_definitions(${PROJECT_NAME}_hotreload PRIVATE ${PLUGIN_DEFINITIONS} CPLUG_SHARED)
+target_include_directories(${PROJECT_NAME}_hotreload PRIVATE ${PLUGIN_INCLUDE})
+target_compile_options(${PROJECT_NAME}_hotreload PRIVATE ${PLUGIN_OPTIONS})
+target_link_libraries(${PROJECT_NAME}_hotreload PRIVATE ${HOTRELOAD_HOST_LIBS})
+# Forces plugin to be built before the host
+add_dependencies(${PROJECT_NAME}_hotreload ${HOTRELOAD_LIB_NAME})
+
+target_precompile_headers(${HOTRELOAD_LIB_NAME} PRIVATE src/common.h)
+target_link_libraries(${HOTRELOAD_LIB_NAME} PRIVATE ${PLUGIN_LIBRARIES})
+
+endif() # CMAKE_BUILD_TYPE MATCHES Debug

@@ -1,8 +1,9 @@
 #include "common.h"
 
 #if !defined(RASTER_STB_TRUETYPE) && !defined(RASTER_FREETYPE_SINGLECHANNEL) && !defined(RASTER_FREETYPE_MULTICHANNEL)
-#define RASTER_STB_TRUETYPE
+// #define RASTER_STB_TRUETYPE
 // #define RASTER_FREETYPE_MULTICHANNEL
+#define RASTER_FREETYPE_SINGLECHANNEL
 #endif
 #if defined(RASTER_FREETYPE_SINGLECHANNEL) || defined(RASTER_FREETYPE_MULTICHANNEL)
 #define RASTER_FREETYPE
@@ -22,7 +23,6 @@
 #include <stb_image.h>
 #include <stb_rect_pack.h>
 
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,13 +54,13 @@
 // https://utf8everywhere.org/
 // static const char* MY_TEXT = "abc";
 // static const char* MY_TEXT = "Sphinx of black quartz, judge my vow";
-static const char* MY_TEXT = "AV. .W.V.";
+// static const char* MY_TEXT = "AV. .W.V.";
 // This used to display correctly in my IDE (VSCode) but it appears to be broken. kb_text_shape v1 couldn't properly
 // segment the text and struggled to correctly position the hebrew glyphs. v2.0 appears to be perfect! Hoorah
 // static const char* MY_TEXT = "Приве́т नमस्ते שָׁלוֹם  wow 🐨";
 // static const char* MY_TEXT = "UTF8 Приве́т नमस्ते שָׁלוֹם";
 // static const char* MY_TEXT = "שָׁלוֹם";
-// static const char* MY_TEXT = "UTF8 Приве́т";
+static const char* MY_TEXT = "UTF8 Приве́т";
 // NOTE: in order to correctly shape this text with kbts, you must explicitly say the text is LTR direction
 // static const char* MY_TEXT = "-48.37dB + 10";
 
@@ -87,6 +87,7 @@ enum
     PLATFORM_SG_PIXEL_FORMAT  = SG_PIXELFORMAT_R8,
 #endif
 
+    // TODO: make this state and not an enum
 #if defined(__APPLE__)
     PLATFORM_BACKING_SCALE_FACTOR = 2,
 #else
@@ -99,10 +100,11 @@ enum
     MAX_VERTICES = MAX_SQUARES * 4,
     MAX_INDICES  = MAX_SQUARES * 6,
 
-    ATLAS_WIDTH       = 128,
+    ATLAS_SIZE_SHIFT = 8,
+    ATLAS_WIDTH       = (1 << ATLAS_SIZE_SHIFT),
     ATLAS_HEIGHT      = ATLAS_WIDTH,
     ATLAS_ROW_STRIDE  = ATLAS_WIDTH * PLATFORM_TEXTURE_CHANNELS,
-    ATLAS_INT16_SHIFT = 8,
+    ATLAS_INT16_SHIFT = (15 - ATLAS_SIZE_SHIFT),
 
     // Sans-serif style typefaces become hard to read below a font size of 7px
     // 8px should be the minimum
@@ -179,13 +181,14 @@ typedef struct atlas_rect_t
 {
     union atlas_rect_header header;
 
-    int pen_offset_x;
-    int pen_offset_y;
+    int16_t x, y, w, h;
 
-    uint8_t x, y, w, h;
+    int16_t pen_offset_x;
+    int16_t pen_offset_y;
+
     sg_view img_view;
 } atlas_rect;
-_Static_assert(ATLAS_WIDTH <= UINT8_MAX + 1, "");
+_Static_assert(ATLAS_WIDTH <= (1llu << 16), "");
 
 typedef struct glyph_atlas
 {
@@ -324,8 +327,8 @@ int raster_glyph(GUI* gui, uint32_t glyph_index, int font_size)
             atlas_rect arect;
             arect.header.glyphid   = glyph_index;
             arect.header.font_size = font_size;
-            arect.pen_offset_x     = glyph->bitmap_left;
-            arect.pen_offset_y     = glyph->bitmap_top;
+            arect.pen_offset_x     = glyph->bitmap_left / PLATFORM_BACKING_SCALE_FACTOR;
+            arect.pen_offset_y     = glyph->bitmap_top / PLATFORM_BACKING_SCALE_FACTOR;
             arect.x                = rect.x;
             arect.y                = rect.y;
             arect.w                = width_pixels;
@@ -385,8 +388,10 @@ int raster_glyph(GUI* gui, uint32_t glyph_index, int font_size)
     int ix0 = 0, iy0 = 0, ix1 = 0, iy1 = 0;
     // TODO: figure out what I should be using here...
     // TODO: figure out how to get rasterizer to match the same height as the text shaper
-    // float scale = stbtt_ScaleForPixelHeight(&gui->fontinfo, font_size);
-    float scale = stbtt_ScaleForMappingEmToPixels(&gui->fontinfo, font_size);
+    float scale_pixel_height = stbtt_ScaleForPixelHeight(&gui->fontinfo, font_size * PLATFORM_BACKING_SCALE_FACTOR);
+    // float scale_emtopixels = stbtt_ScaleForMappingEmToPixels(&gui->fontinfo, font_size *
+    // PLATFORM_BACKING_SCALE_FACTOR);
+    float scale = scale_pixel_height;
     stbtt_GetGlyphHMetrics(&gui->fontinfo, glyph_index, &advanceWidth, &leftSideBearing);
     stbtt_GetGlyphBitmapBox(&gui->fontinfo, glyph_index, scale, scale, &ix0, &iy0, &ix1, &iy1);
 
@@ -434,8 +439,8 @@ int raster_glyph(GUI* gui, uint32_t glyph_index, int font_size)
             atlas_rect arect;
             arect.header.glyphid   = glyph_index;
             arect.header.font_size = font_size;
-            arect.pen_offset_x     = ix0;
-            arect.pen_offset_y     = -iy0;
+            arect.pen_offset_x     = ix0 / PLATFORM_BACKING_SCALE_FACTOR;
+            arect.pen_offset_y     = -iy0 / PLATFORM_BACKING_SCALE_FACTOR;
             arect.x                = rect.x;
             arect.y                = rect.y;
             arect.w                = iw;
@@ -462,31 +467,37 @@ int raster_glyph(GUI* gui, uint32_t glyph_index, int font_size)
 #endif
 
 // Get cached rect. Rasters the rect to an atlas if not already cached
-// TODO: also compare font id & font height
-atlas_rect* get_glyph_rect(GUI* gui, uint32_t glyph_index, int font_size)
+// TODO: also compare font id
+// TODO: use fallback fonts. This may require accepting utf32 codepoints to detect language
+const atlas_rect* get_glyph_rect(GUI* gui, uint32_t glyph_index, int font_size)
 {
-    atlas_rect* rect      = NULL;
     const int   num_rects = xarr_len(gui->rects);
+
+    const union atlas_rect_header header = {.glyphid = glyph_index, .font_size = font_size};
+
     for (int j = 0; j < num_rects; j++)
     {
-        if (gui->rects[j].header.glyphid == glyph_index)
-        {
-            rect = gui->rects + j;
-            return rect;
-        }
+        if (gui->rects[j].header.data == header.data)
+            return gui->rects + j;
     }
+
     int did_raster = raster_glyph(gui, glyph_index, font_size);
     if (did_raster)
     {
         xassert(num_rects + 1 == xarr_len(gui->rects));
-        rect = gui->rects + num_rects;
+        return gui->rects + num_rects;
     }
-    return rect;
+
+    // Note: this stub has a texture view id of 0
+    // sokol_gfx should assert in debug mode when trying to bind a texture view with an id of 0
+    // In release it should skip all draws using that view. This is our desired behaviour
+    static const atlas_rect stub_rect = {0};
+    return &stub_rect;
 }
 
 void draw_glyph(GUI* gui, unsigned glyph_idx, int pen_x, int pen_y, int font_size)
 {
-    atlas_rect* rect = get_glyph_rect(gui, glyph_idx, font_size);
+    const atlas_rect* rect = get_glyph_rect(gui, glyph_idx, font_size);
 
     if (rect)
     {
@@ -495,10 +506,10 @@ void draw_glyph(GUI* gui, unsigned glyph_idx, int pen_x, int pen_y, int font_siz
         int16_t tex_r = rect->x + rect->w;
         int16_t tex_b = rect->y + rect->h;
 
-        xassert(tex_l >= 0 && tex_l < 128);
-        xassert(tex_t >= 0 && tex_t < 128);
-        xassert(tex_r >= 0 && tex_r < 128);
-        xassert(tex_b >= 0 && tex_b < 128);
+        xassert(tex_l >= 0 && tex_l < ATLAS_WIDTH);
+        xassert(tex_t >= 0 && tex_t < ATLAS_HEIGHT);
+        xassert(tex_r >= 0 && tex_r < ATLAS_WIDTH);
+        xassert(tex_b >= 0 && tex_b < ATLAS_HEIGHT);
 
         // atlas coordinates to INT16 normalised texture coordinates
         tex_l <<= ATLAS_INT16_SHIFT;
@@ -506,8 +517,8 @@ void draw_glyph(GUI* gui, unsigned glyph_idx, int pen_x, int pen_y, int font_siz
         tex_r <<= ATLAS_INT16_SHIFT;
         tex_b <<= ATLAS_INT16_SHIFT;
 
-        int glyph_left   = pen_x + rect->pen_offset_x / PLATFORM_BACKING_SCALE_FACTOR;
-        int glyph_top    = pen_y - rect->pen_offset_y / PLATFORM_BACKING_SCALE_FACTOR;
+        int glyph_left   = pen_x + (int)rect->pen_offset_x;
+        int glyph_top    = pen_y - (int)rect->pen_offset_y;
         int glyph_right  = glyph_left + (int)rect->w / PLATFORM_BACKING_SCALE_FACTOR;
         int glyph_bottom = glyph_top + (int)rect->h / PLATFORM_BACKING_SCALE_FACTOR;
 
@@ -875,6 +886,8 @@ void pw_tick(void* _gui)
     const FT_Size_Metrics* FtSizeMetrics = &gui->ft_face->size->metrics;
     int                    x_scale       = FtSizeMetrics->x_scale;
     int                    y_scale       = FtSizeMetrics->y_scale;
+    x_scale /= PLATFORM_BACKING_SCALE_FACTOR;
+    y_scale /= PLATFORM_BACKING_SCALE_FACTOR;
 
     int max_font_height_pixels = (gui->ft_face->size->metrics.ascender - gui->ft_face->size->metrics.descender) >> 6;
     pen_y                      = max_font_height_pixels + (gui->ft_face->size->metrics.descender >> 6);
@@ -908,10 +921,8 @@ void pw_tick(void* _gui)
             int GlyphX = CursorX + Glyph->OffsetX;
             int GlyphY = CursorY + Glyph->OffsetY;
 
-            int glyph_x  = ((GlyphX >> 6) * x_scale) >> 16;
-            int glyph_y  = ((GlyphY >> 6) * y_scale) >> 16;
-            glyph_x     /= PLATFORM_BACKING_SCALE_FACTOR;
-            glyph_y     /= PLATFORM_BACKING_SCALE_FACTOR;
+            int glyph_x = ((GlyphX >> 6) * x_scale) >> 16;
+            int glyph_y = ((GlyphY >> 6) * y_scale) >> 16;
             draw_glyph(gui, Glyph->Id, pen_x + glyph_x, pen_y + glyph_y, FONT_SIZE);
 
             CursorX += Glyph->AdvanceX;
