@@ -1,7 +1,4 @@
-#include "libs/kb_text_shape.h"
 #include <stdlib.h>
-#include <vcruntime.h>
-#define STB_RECT_PACK_IMPLEMENTATION
 
 #include "common.h"
 #include "plugin.h"
@@ -29,14 +26,13 @@
 #include <text.glsl.h>
 
 // #define USE_HARFBUZZ
-#ifdef USE_HARFBUZZ
-#include <hb.h>
+// #ifdef USE_HARFBUZZ
+// #include <hb.h>
 
-#include <hb-ft.h>
-#else
-#define KB_TEXT_SHAPE_IMPLEMENTATION
+// #include <hb-ft.h>
+// #else
 #include "kb_text_shape.h"
-#endif // !USE_HARFBUZZ
+// #endif // !USE_HARFBUZZ
 
 // TODO
 // Bind correct atlas img when drawing text
@@ -47,6 +43,66 @@
 // Test mixed language strings (Try this? https://github.com/Tehreer/SheenBidi)
 // Add ability to clear font atlas on resize
 // Use smaller atlases 128x128 (RGBA 64kb)
+
+// https://utf8everywhere.org/
+// static const char* MY_TEXT = "abc";
+// static const char* MY_TEXT = "Sphinx of black quartz, judge my vow";
+// static const char* MY_TEXT = "AV. .W.V.";
+// This used to display correctly in my IDE (VSCode) but it appears to be broken. kb_text_shape v1 couldn't properly
+// segment the text and struggled to correctly position the hebrew glyphs. v2.0 appears to be perfect! Hoorah
+static const char* MY_TEXT = "Приве́т नमस्ते שָׁלוֹם  wow 🐨";
+// static const char* MY_TEXT = "UTF8 Приве́т नमस्ते שָׁלוֹם";
+// static const char* MY_TEXT = "שָׁלוֹם";
+// static const char* MY_TEXT = "UTF8 Приве́т";
+// NOTE: in order to correctly shape this text with kbts, you must explicitly say the text is LTR direction
+// static const char* MY_TEXT = "-48.37dB + 10";
+
+enum
+{
+#if defined(__APPLE__)
+    PLATFORM_FT_RENDER_MODE   = FT_RENDER_MODE_NORMAL,
+    PLATFORM_FT_PIXEL_MODE    = FT_PIXEL_MODE_GRAY,
+    PLATFORM_FT_BITMAP_WIDTH  = 1,
+    PLATFORM_TEXTURE_CHANNELS = 1,
+    PLATFORM_SG_PIXEL_FORMAT  = SG_PIXELFORMAT_R8,
+#else
+    PLATFORM_RENDER_MODE      = FT_RENDER_MODE_LCD, // subpixel antialiasing, horizontal screen
+    PLATFORM_PIXEL_MODE       = FT_PIXEL_MODE_LCD,
+    PLATFORM_BITMAP_WIDTH     = 3,
+    PLATFORM_TEXTURE_CHANNELS = 4,
+    PLATFORM_SG_PIXEL_FORMAT  = SG_PIXELFORMAT_RGBA8,
+#endif
+
+#if defined(__APPLE__)
+    PLATFORM_BACKING_SCALE_FACTOR = 2,
+#else
+    PLATFORM_BACKING_SCALE_FACTOR = 1,
+#endif
+
+    // MAX_SQUARES  = 1024 * 10 + 512 + 128 + 32 + 8 + 2,
+    // MAX_SQUARES = (1 << 16) / 6,
+    MAX_SQUARES  = 128,
+    MAX_VERTICES = MAX_SQUARES * 4,
+    MAX_INDICES  = MAX_SQUARES * 6,
+
+    ATLAS_WIDTH       = 128,
+    ATLAS_HEIGHT      = ATLAS_WIDTH,
+    ATLAS_ROW_STRIDE  = ATLAS_WIDTH * PLATFORM_TEXTURE_CHANNELS,
+    ATLAS_INT16_SHIFT = 8,
+
+    // Sans-serif style typefaces become hard to read below a font size of 7px
+    // 8px should be the minimum
+    FONT_SIZE        = 12,
+    RECTPACK_PADDING = 1,
+};
+_Static_assert(MAX_INDICES < UINT16_MAX, "UINT16 Overflow");
+_Static_assert((ATLAS_WIDTH << ATLAS_INT16_SHIFT) == (1 << 15), "");
+
+typedef struct
+{
+    float   x, y;
+    int16_t u, v;
+} vertex_t;
 
 struct load_img_t
 {
@@ -73,15 +129,14 @@ bool load_image(const char* path, struct load_img_t* out)
         ok = img_buf != NULL;
         if (ok)
         {
-            out->img = sg_make_image(&(sg_image_desc){
-                .width        = x,
-                .height       = y,
-                .pixel_format = SG_PIXELFORMAT_RGBA8,
+            out->img = sg_make_image(&(sg_image_desc){.width        = x,
+                                                      .height       = y,
+                                                      .pixel_format = SG_PIXELFORMAT_RGBA8,
 
-                .data.mip_levels[0] = {
-                    .ptr  = img_buf,
-                    .size = x * y * 4,
-                }});
+                                                      .data.mip_levels[0] = {
+                                                          .ptr  = img_buf,
+                                                          .size = x * y * 4,
+                                                      }});
             stbi_image_free(img_buf);
 
             out->width  = x;
@@ -92,46 +147,6 @@ bool load_image(const char* path, struct load_img_t* out)
     }
     return ok;
 }
-
-typedef struct
-{
-    float   x, y;
-    int16_t u, v;
-} vertex_t;
-
-// https://utf8everywhere.org/
-// static const char* MY_TEXT = "abc";
-// static const char* MY_TEXT = "Sphinx of black quartz, judge my vow";
-// static const char* MY_TEXT = "AV. .W.V.";
-// This used to display correctly in my IDE (VSCode) but it appears to be broken. kb_text_shape v1 couldn't properly
-// segment the text and struggled to correctly position the hebrew glyphs. v2.0 appears to be perfect! Hoorah
-static const char* MY_TEXT = "Приве́т नमस्ते שָׁלוֹם  wow 🐨";
-// static const char* MY_TEXT = "UTF8 Приве́т नमस्ते שָׁלוֹם";
-// static const char* MY_TEXT = "שָׁלוֹם";
-// static const char* MY_TEXT = "UTF8 Приве́т";
-// NOTE: in order to correctly shape this text with kbts, you must explicitly say the text is LTR direction
-// static const char* MY_TEXT = "-48.37dB + 10";
-
-enum
-{
-    // MAX_SQUARES  = 1024 * 10 + 512 + 128 + 32 + 8 + 2,
-    // MAX_SQUARES = (1 << 16) / 6,
-    MAX_SQUARES  = 128,
-    MAX_VERTICES = MAX_SQUARES * 4,
-    MAX_INDICES  = MAX_SQUARES * 6,
-
-    ATLAS_WIDTH       = 128,
-    ATLAS_HEIGHT      = ATLAS_WIDTH,
-    ATLAS_ROW_STRIDE  = ATLAS_WIDTH * 4,
-    ATLAS_INT16_SHIFT = 8,
-
-    // Sans-serif style typefaces become hard to read below a font size of 7px
-    // 8px should be the minimum
-    FONT_SIZE        = 12,
-    RECTPACK_PADDING = 1,
-};
-_Static_assert(MAX_INDICES < UINT16_MAX, "UINT16 Overflow");
-_Static_assert((ATLAS_WIDTH << ATLAS_INT16_SHIFT) == (1 << 15), "");
 
 // Used to identify a unique glyph.
 // TODO: support multiple fonts
@@ -169,7 +184,7 @@ glyph_atlas glyph_atlas_new()
     sg_image img = sg_make_image(&(sg_image_desc){
         .width                = ATLAS_WIDTH,
         .height               = ATLAS_HEIGHT,
-        .pixel_format         = SG_PIXELFORMAT_RGBA8,
+        .pixel_format         = PLATFORM_SG_PIXEL_FORMAT,
         .usage.dynamic_update = true,
     });
     xassert(img.id);
@@ -210,10 +225,10 @@ typedef struct GUI
 #endif
 
     // Text pipeline
-    sg_pipeline pip;
-    sg_buffer   vbo;
-    sg_buffer   ibo;
-    sg_sampler  smp;
+    sg_pipeline text_pip;
+    sg_buffer   text_vbo;
+    sg_buffer   text_ibo;
+    sg_sampler  text_smp;
 
     sg_pipeline img_pip;
     sg_image    img_girl_jacket;
@@ -239,17 +254,17 @@ int raster_glyph(GUI* gui, uint32_t glyph_index)
 
     FT_GlyphSlot glyph = gui->ft_face->glyph;
 
-    FT_Render_Mode render_mode = FT_RENDER_MODE_LCD; // subpixel antialiasing, horizontal screen
+    FT_Render_Mode render_mode = PLATFORM_FT_RENDER_MODE;
     FT_Render_Glyph(glyph, render_mode);
 
     const FT_Bitmap* bmp = &glyph->bitmap;
-    xassert(bmp->pixel_mode == FT_PIXEL_MODE_LCD);
-    xassert((bmp->width % 3) == 0); // note: FT width is measured in bytes (subpixels)
+    xassert(bmp->pixel_mode == PLATFORM_FT_PIXEL_MODE);
+    xassert((bmp->width % PLATFORM_FT_BITMAP_WIDTH) == 0); // note: FT width is measured in bytes (subpixels)
 
     // Note all glyphs have height/rows... (spaces?)
     if (bmp->width && bmp->rows)
     {
-        int        width_pixels = bmp->width / 3;
+        int        width_pixels = bmp->width / PLATFORM_FT_BITMAP_WIDTH;
         stbrp_rect rect         = {.w = width_pixels + RECTPACK_PADDING, .h = bmp->rows + RECTPACK_PADDING};
         num_packed              = stbrp_pack_rects(&gui->current_atlas.ctx, &rect, 1);
 
@@ -305,6 +320,19 @@ int raster_glyph(GUI* gui, uint32_t glyph_index)
 
             for (int y = 0; y < bmp->rows; y++)
             {
+#if defined(__APPLE__)
+                unsigned char* dst = gui->current_atlas.img_data + (rect.y + y) * ATLAS_ROW_STRIDE + rect.x;
+                unsigned char* src = bmp->buffer + y * bmp->pitch;
+
+                unsigned char(*src_view)[512]  = (void*)src;
+                src_view                      += 0;
+                unsigned char(*dst_view)[512]  = (void*)dst;
+                dst_view                      += 0;
+
+                memcpy(dst, src, width_pixels);
+
+                dst_view += 0;
+#else
                 unsigned char* dst = gui->current_atlas.img_data + (rect.y + y) * ATLAS_ROW_STRIDE + rect.x * 4;
                 unsigned char* src = bmp->buffer + y * bmp->pitch;
 
@@ -315,6 +343,7 @@ int raster_glyph(GUI* gui, uint32_t glyph_index)
                     dst[2] = src[2];
                     dst[3] = 0xff;
                 }
+#endif
             }
 
             atlas->dirty = true;
@@ -325,6 +354,7 @@ int raster_glyph(GUI* gui, uint32_t glyph_index)
 }
 
 // Get cached rect. Rasters the rect to an atlas if not already cached
+// TODO: also compare font id & font height
 atlas_rect* get_glyph_rect(GUI* gui, uint32_t glyph_index)
 {
     atlas_rect* rect      = NULL;
@@ -368,10 +398,10 @@ void draw_glyph(GUI* gui, unsigned glyph_idx, int pen_x, int pen_y)
         tex_r <<= ATLAS_INT16_SHIFT;
         tex_b <<= ATLAS_INT16_SHIFT;
 
-        int glyph_left   = pen_x + rect->pen_offset_x;
-        int glyph_top    = pen_y - rect->pen_offset_y;
-        int glyph_right  = glyph_left + (int)rect->w;
-        int glyph_bottom = glyph_top + (int)rect->h;
+        int glyph_left   = pen_x + rect->pen_offset_x / PLATFORM_BACKING_SCALE_FACTOR;
+        int glyph_top    = pen_y - rect->pen_offset_y / PLATFORM_BACKING_SCALE_FACTOR;
+        int glyph_right  = glyph_left + (int)rect->w / PLATFORM_BACKING_SCALE_FACTOR;
+        int glyph_bottom = glyph_top + (int)rect->h / PLATFORM_BACKING_SCALE_FACTOR;
 
         const int gui_width  = gui->plugin->width;
         const int gui_height = gui->plugin->height;
@@ -488,41 +518,55 @@ void* pw_create_gui(void* _plugin, void* _pw)
 
     // img shader
     {
-        gui->vbo = sg_make_buffer(&(sg_buffer_desc){
-            .usage.vertex_buffer = true,
-            .usage.stream_update = true,
-            .size                = sizeof(gui->vertices),
-            .label               = "img-vertices"});
+        gui->text_vbo = sg_make_buffer(&(sg_buffer_desc){.usage.vertex_buffer = true,
+                                                         .usage.stream_update = true,
+                                                         .size                = sizeof(gui->vertices),
+                                                         .label               = "img-vertices"});
 
-        gui->ibo = sg_make_buffer(&(sg_buffer_desc){
-            .usage.index_buffer  = true,
-            .usage.stream_update = true,
-            .size                = sizeof(gui->indices),
-            .label               = "img-indices"});
+        gui->text_ibo = sg_make_buffer(&(sg_buffer_desc){.usage.index_buffer  = true,
+                                                         .usage.stream_update = true,
+                                                         .size                = sizeof(gui->indices),
+                                                         .label               = "img-indices"});
 
-        // sg_update_buffer(gui->ibo, &SG_RANGE(indices));
-
-        sg_shader shd = sg_make_shader(text_shader_desc(sg_query_backend()));
-        gui->pip      = sg_make_pipeline(&(sg_pipeline_desc){
-                 .shader     = shd,
-                 .index_type = SG_INDEXTYPE_UINT16,
-                 .layout =
+#if defined(__APPLE__)
+        sg_shader shd = sg_make_shader(text_singlechannel_shader_desc(sg_query_backend()));
+#else
+        sg_shader shd = sg_make_shader(text_multichannel_shader_desc(sg_query_backend()));
+#endif
+        sg_pipeline_desc pip_desc = {
+            .shader     = shd,
+            .index_type = SG_INDEXTYPE_UINT16,
+            .layout =
                 {.attrs =
-                          {[ATTR_text_position].format  = SG_VERTEXFORMAT_FLOAT2,
-                           [ATTR_text_texcoord0].format = SG_VERTEXFORMAT_SHORT2N}},
-                 .colors[0] =
-                {.write_mask = SG_COLORMASK_RGB,
-                      .blend =
-                          {
-                              .enabled        = true,
-                              .src_factor_rgb = SG_BLENDFACTOR_ONE,
-                              .dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_COLOR,
-                     }},
-                 .label = "img-pipeline"});
+                     {[ATTR_text_singlechannel_position].format  = SG_VERTEXFORMAT_FLOAT2,
+                      [ATTR_text_singlechannel_texcoord0].format = SG_VERTEXFORMAT_SHORT2N}},
+            .label = "img-pipeline"};
+        xstatic_assert(ATTR_text_singlechannel_position == ATTR_text_multichannel_position);
+        xstatic_assert(ATTR_text_singlechannel_texcoord0 == ATTR_text_multichannel_texcoord0);
+#if defined(__APPLE__)
+        pip_desc.colors[0] = (sg_color_target_state){.write_mask = SG_COLORMASK_RGBA,
+                                                     .blend      = {
+                                                              .enabled          = true,
+                                                              .src_factor_rgb   = SG_BLENDFACTOR_SRC_ALPHA,
+                                                              .src_factor_alpha = SG_BLENDFACTOR_ONE,
+                                                              .dst_factor_rgb   = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+                                                              .dst_factor_alpha = SG_BLENDFACTOR_ONE,
+                                                     }};
+#else
+        pip_desc.colors[0] = (sg_color_target_state){.write_mask = SG_COLORMASK_RGB,
+                                                     .blend      = {
+                                                              .enabled        = true,
+                                                              .src_factor_rgb = SG_BLENDFACTOR_ONE,
+                                                              .dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_COLOR,
+                                                     }};
+#endif
+        gui->text_pip = sg_make_pipeline(&pip_desc);
     }
 
     int err = FT_Init_FreeType(&gui->ft_lib);
     xassert(!err);
+
+#if defined(_WIN32)
     // const char* font_path = "C:\\Windows\\Fonts\\arialbd.ttf";
     const char* font_path = "C:\\Windows\\Fonts\\seguisb.ttf";
     // const char* font_path = "C:\\Windows\\Fonts\\segoeui.ttf";
@@ -530,13 +574,17 @@ void* pw_create_gui(void* _plugin, void* _pw)
     // const char* font_path = "C:\\Windows\\Fonts\\seguisb.ttf"; // semibold
     // const char* font_path = SRC_DIR XFILES_DIR_STR "assets" XFILES_DIR_STR "EBGaramond-Regular.ttf";
     // const char* font_path = SRC_DIR XFILES_DIR_STR "assets" XFILES_DIR_STR "NotoSansHebrew-Regular.ttf";
+#elif defined(__APPLE__)
+    const char* font_path = "/Library/Fonts/Arial Unicode.ttf";
+#endif
+
     xassert(xfiles_exists(font_path));
     err = FT_New_Face(gui->ft_lib, font_path, 0, &gui->ft_face);
     xassert(!err);
     println("Found %ld glyphs", gui->ft_face->num_glyphs);
 
     const float DPI = 96;
-    FT_Set_Char_Size(gui->ft_face, 0, FONT_SIZE * 64, DPI, DPI);
+    FT_Set_Char_Size(gui->ft_face, 0, FONT_SIZE * 64 * PLATFORM_BACKING_SCALE_FACTOR, DPI, DPI);
 
     gui->current_atlas.idx = 0;
     xarr_setcap(gui->glyph_atlases, 16);
@@ -631,7 +679,7 @@ bool pw_event(const PWEvent* event)
     if (!gui || !gui->plugin)
         return false;
 
-    if (event->type == PW_EVENT_RESIZE)
+    if (event->type == PW_EVENT_RESIZE_UPDATE)
     {
         // Retain size info for when the GUI is destroyed / reopened
         gui->plugin->width  = event->resize.width;
@@ -757,8 +805,10 @@ void pw_tick(void* _gui)
             int GlyphX = CursorX + Glyph->OffsetX;
             int GlyphY = CursorY + Glyph->OffsetY;
 
-            int glyph_x = ((GlyphX >> 6) * FtSizeMetrics->x_scale) >> 16;
-            int glyph_y = ((GlyphY >> 6) * FtSizeMetrics->y_scale) >> 16;
+            int glyph_x  = ((GlyphX >> 6) * FtSizeMetrics->x_scale) >> 16;
+            int glyph_y  = ((GlyphY >> 6) * FtSizeMetrics->y_scale) >> 16;
+            glyph_x     /= PLATFORM_BACKING_SCALE_FACTOR;
+            glyph_y     /= PLATFORM_BACKING_SCALE_FACTOR;
             draw_glyph(gui, Glyph->Id, pen_x + glyph_x, pen_y + glyph_y);
 
             CursorX += Glyph->AdvanceX;
@@ -777,24 +827,23 @@ void pw_tick(void* _gui)
             sg_view_desc view_desc = sg_query_view_desc(atlas->img_view);
             sg_update_image(
                 view_desc.texture.image,
-                &(sg_image_data){
-                    .mip_levels[0] = {
-                        .ptr  = gui->current_atlas.img_data,
-                        .size = ATLAS_HEIGHT * ATLAS_ROW_STRIDE,
-                    }});
+                &(sg_image_data){.mip_levels[0] = {
+                                     .ptr  = gui->current_atlas.img_data,
+                                     .size = ATLAS_HEIGHT * ATLAS_ROW_STRIDE,
+                                 }});
             atlas->dirty = false;
         }
 
         sg_range vert_range = {.ptr = gui->vertices, .size = sizeof(gui->vertices[0]) * gui->num_vertices};
         sg_range idx_range  = {.ptr = gui->indices, .size = sizeof(gui->indices[0]) * gui->num_indices};
-        sg_update_buffer(gui->vbo, &vert_range);
-        sg_update_buffer(gui->ibo, &idx_range);
+        sg_update_buffer(gui->text_vbo, &vert_range);
+        sg_update_buffer(gui->text_ibo, &idx_range);
 
-        sg_apply_pipeline(gui->pip);
+        sg_apply_pipeline(gui->text_pip);
 
         sg_bindings bind            = {0};
-        bind.vertex_buffers[0]      = gui->vbo;
-        bind.index_buffer           = gui->ibo;
+        bind.vertex_buffers[0]      = gui->text_vbo;
+        bind.index_buffer           = gui->text_ibo;
         bind.views[VIEW_text_tex]   = atlas->img_view;
         bind.samplers[SMP_text_smp] = gui->sampler_nearest;
 

@@ -6,6 +6,7 @@
 
 #include "common.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <xhl/alloc.h>
 #include <xhl/debug.h>
@@ -13,6 +14,9 @@
 #include <xhl/maths.h>
 #include <xhl/thread.h>
 #include <xhl/time.h>
+
+CFRunLoopTimerRef g_timer;
+int               g_platform_init_counter = 0;
 
 #ifndef NDEBUG
 void println(const char* const fmt, ...)
@@ -23,7 +27,7 @@ void println(const char* const fmt, ...)
     int n = vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
 
-    if (n > 0)
+    if (n)
     {
         if (n < sizeof(buf) && buf[n - 1] != '\n')
         {
@@ -32,14 +36,16 @@ void println(const char* const fmt, ...)
         }
 
 #ifdef CPLUG_BUILD_STANDALONE
-        OutputDebugStringA(buf);
-        // fwrite(buf, 1, n, stderr);
+        fwrite(buf, 1, n, stdout);
 #else
-        // char path[1024];
-        // bool ok = xfiles_get_user_directory(path, sizeof(path), XFILES_USER_DIRECTORY_DESKTOP);
-        // xassert(ok);
-        // strcat(path, "\\log.txt");
-        // ok = ok && xfiles_append(path, buf, n);
+        // static char path[1024] = {0};
+        // if (strlen(path) == 0)
+        // {
+        //     bool ok = xfiles_get_user_directory(path, sizeof(path), XFILES_USER_DIRECTORY_DESKTOP);
+        //     xassert(ok);
+        //     strcat(path, "/log.txt");
+        // }
+        // bool ok = xfiles_append(path, buf, n);
         // xassert(ok);
 #endif
     }
@@ -49,7 +55,6 @@ void println(const char* const fmt, ...)
 void library_load_platform()
 {
 }
-
 void library_unload_platform()
 {
 }
