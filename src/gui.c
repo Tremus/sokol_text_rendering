@@ -1,6 +1,13 @@
-#include <stdlib.h>
-
 #include "common.h"
+
+#if !defined(RASTER_STB_TRUETYPE) && !defined(RASTER_FREETYPE_SINGLECHANNEL) && !defined(RASTER_FREETYPE_MULTICHANNEL)
+#define RASTER_STB_TRUETYPE
+// #define RASTER_FREETYPE_MULTICHANNEL
+#endif
+#if defined(RASTER_FREETYPE_SINGLECHANNEL) || defined(RASTER_FREETYPE_MULTICHANNEL)
+#define RASTER_FREETYPE
+#endif
+
 #include "plugin.h"
 
 #include <xhl/array.h>
@@ -17,10 +24,17 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
+#if defined(RASTER_FREETYPE_SINGLECHANNEL) || defined(RASTER_FREETYPE_MULTICHANNEL)
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#endif
+
+#if defined(RASTER_STB_TRUETYPE)
+#include <stb_truetype.h>
+#endif
 
 #include <img.glsl.h>
 #include <text.glsl.h>
@@ -40,10 +54,10 @@
 // https://utf8everywhere.org/
 // static const char* MY_TEXT = "abc";
 // static const char* MY_TEXT = "Sphinx of black quartz, judge my vow";
-// static const char* MY_TEXT = "AV. .W.V.";
+static const char* MY_TEXT = "AV. .W.V.";
 // This used to display correctly in my IDE (VSCode) but it appears to be broken. kb_text_shape v1 couldn't properly
 // segment the text and struggled to correctly position the hebrew glyphs. v2.0 appears to be perfect! Hoorah
-static const char* MY_TEXT = "Приве́т नमस्ते שָׁלוֹם  wow 🐨";
+// static const char* MY_TEXT = "Приве́т नमस्ते שָׁלוֹם  wow 🐨";
 // static const char* MY_TEXT = "UTF8 Приве́т नमस्ते שָׁלוֹם";
 // static const char* MY_TEXT = "שָׁלוֹם";
 // static const char* MY_TEXT = "UTF8 Приве́т";
@@ -52,7 +66,8 @@ static const char* MY_TEXT = "Приве́т नमस्ते שָׁלוֹם  
 
 enum
 {
-#if defined(__APPLE__)
+#if defined(RASTER_FREETYPE_SINGLECHANNEL) || defined(RASTER_FREETYPE_MULTICHANNEL)
+#if defined(RASTER_FREETYPE_SINGLECHANNEL)
     PLATFORM_FT_RENDER_MODE   = FT_RENDER_MODE_NORMAL,
     PLATFORM_FT_PIXEL_MODE    = FT_PIXEL_MODE_GRAY,
     PLATFORM_FT_BITMAP_WIDTH  = 1,
@@ -64,6 +79,12 @@ enum
     PLATFORM_FT_BITMAP_WIDTH  = 3,
     PLATFORM_TEXTURE_CHANNELS = 4,
     PLATFORM_SG_PIXEL_FORMAT  = SG_PIXELFORMAT_RGBA8,
+#endif
+#endif // RASTER_FREETYPE_SINGLECHANNEL || RASTER_FREETYPE_MULTICHANNEL
+
+#ifdef RASTER_STB_TRUETYPE
+    PLATFORM_TEXTURE_CHANNELS = 1,
+    PLATFORM_SG_PIXEL_FORMAT  = SG_PIXELFORMAT_R8,
 #endif
 
 #if defined(__APPLE__)
@@ -204,8 +225,17 @@ typedef struct GUI
         unsigned char* img_data;
     } current_atlas;
 
+    void*  fontdata;
+    size_t fontdata_size;
+
+#ifdef RASTER_FREETYPE
     FT_Library ft_lib;
     FT_Face    ft_face;
+#endif
+
+#ifdef RASTER_STB_TRUETYPE
+    stbtt_fontinfo fontinfo;
+#endif
 
     kbts_shape_context* kb_context;
 
@@ -227,12 +257,17 @@ typedef struct GUI
     uint16_t indices[MAX_INDICES];
 } GUI;
 
-int raster_glyph(GUI* gui, uint32_t glyph_index)
+int raster_glyph(GUI* gui, uint32_t glyph_index, int font_size);
+#ifdef RASTER_FREETYPE
+int raster_glyph(GUI* gui, uint32_t glyph_index, int font_size)
 {
     int num_packed = 0;
 
     xassert(gui->current_atlas.idx < xarr_len(gui->glyph_atlases));
     glyph_atlas* atlas = gui->glyph_atlases + gui->current_atlas.idx;
+
+    const float DPI = 96;
+    FT_Set_Char_Size(gui->ft_face, 0, font_size * 64 * PLATFORM_BACKING_SCALE_FACTOR, DPI, DPI);
 
     int err = FT_Load_Glyph(gui->ft_face, glyph_index, FT_LOAD_DEFAULT);
     xassert(!err);
@@ -288,7 +323,7 @@ int raster_glyph(GUI* gui, uint32_t glyph_index)
         {
             atlas_rect arect;
             arect.header.glyphid   = glyph_index;
-            arect.header.font_size = FONT_SIZE;
+            arect.header.font_size = font_size;
             arect.pen_offset_x     = glyph->bitmap_left;
             arect.pen_offset_y     = glyph->bitmap_top;
             arect.x                = rect.x;
@@ -305,7 +340,7 @@ int raster_glyph(GUI* gui, uint32_t glyph_index)
 
             for (int y = 0; y < bmp->rows; y++)
             {
-#if defined(__APPLE__)
+#if defined(RASTER_FREETYPE_SINGLECHANNEL)
                 unsigned char* dst = gui->current_atlas.img_data + (rect.y + y) * ATLAS_ROW_STRIDE + rect.x;
                 unsigned char* src = bmp->buffer + y * bmp->pitch;
 
@@ -337,10 +372,98 @@ int raster_glyph(GUI* gui, uint32_t glyph_index)
 
     return num_packed;
 }
+#endif // RASTER_FREETYPE
+#ifdef RASTER_STB_TRUETYPE
+int raster_glyph(GUI* gui, uint32_t glyph_index, int font_size)
+{
+    int num_packed = 0;
+
+    xassert(gui->current_atlas.idx < xarr_len(gui->glyph_atlases));
+    glyph_atlas* atlas = gui->glyph_atlases + gui->current_atlas.idx;
+
+    int advanceWidth = 0, leftSideBearing = 0;
+    int ix0 = 0, iy0 = 0, ix1 = 0, iy1 = 0;
+    // TODO: figure out what I should be using here...
+    // TODO: figure out how to get rasterizer to match the same height as the text shaper
+    // float scale = stbtt_ScaleForPixelHeight(&gui->fontinfo, font_size);
+    float scale = stbtt_ScaleForMappingEmToPixels(&gui->fontinfo, font_size);
+    stbtt_GetGlyphHMetrics(&gui->fontinfo, glyph_index, &advanceWidth, &leftSideBearing);
+    stbtt_GetGlyphBitmapBox(&gui->fontinfo, glyph_index, scale, scale, &ix0, &iy0, &ix1, &iy1);
+
+    int iw = ix1 - ix0;
+    int ih = iy1 - iy0;
+
+    if (iw && ih)
+    {
+        stbrp_rect rect = {.w = iw + RECTPACK_PADDING, .h = ih + RECTPACK_PADDING};
+        num_packed      = stbrp_pack_rects(&gui->current_atlas.ctx, &rect, 1);
+
+        if (num_packed == 0) // atlas is full
+        {
+            atlas->full = true;
+
+            sg_view_desc view_desc = sg_query_view_desc(atlas->img_view);
+            sg_update_image(
+                view_desc.texture.image,
+                &(sg_image_data){.mip_levels[0] = {gui->current_atlas.img_data, ATLAS_HEIGHT * ATLAS_ROW_STRIDE}});
+            atlas->dirty = false;
+
+            // Clear rectpack
+            memset(&gui->current_atlas.ctx, 0, sizeof(gui->current_atlas.ctx));
+            stbrp_init_target(
+                &gui->current_atlas.ctx,
+                ATLAS_WIDTH,
+                ATLAS_HEIGHT,
+                gui->current_atlas.nodes,
+                xarr_len(gui->current_atlas.nodes));
+
+            rect       = (stbrp_rect){.w = iw + RECTPACK_PADDING, .h = ih + RECTPACK_PADDING};
+            num_packed = stbrp_pack_rects(&gui->current_atlas.ctx, &rect, 1);
+            xassert(num_packed == 1);
+
+            // make new atlas
+            glyph_atlas new_atlas = glyph_atlas_new();
+            xarr_push(gui->glyph_atlases, new_atlas);
+            gui->current_atlas.idx++;
+
+            atlas = gui->glyph_atlases + gui->current_atlas.idx;
+        }
+
+        if (num_packed)
+        {
+            atlas_rect arect;
+            arect.header.glyphid   = glyph_index;
+            arect.header.font_size = font_size;
+            arect.pen_offset_x     = ix0;
+            arect.pen_offset_y     = -iy0;
+            arect.x                = rect.x;
+            arect.y                = rect.y;
+            arect.w                = iw;
+            arect.h                = ih;
+            arect.img_view         = atlas->img_view;
+            xassert(arect.x + arect.w <= ATLAS_WIDTH);
+            xassert(arect.y + arect.h <= ATLAS_HEIGHT);
+
+            unsigned char* dst =
+                gui->current_atlas.img_data + rect.y * ATLAS_ROW_STRIDE + rect.x * PLATFORM_TEXTURE_CHANNELS;
+
+            stbtt_MakeGlyphBitmap(&gui->fontinfo, dst, iw, ih, ATLAS_ROW_STRIDE, scale, scale, glyph_index);
+
+            xarr_push(gui->rects, arect);
+
+            atlas->dirty = true;
+        }
+    }
+
+    // stbtt_MakeGlyphBitmap(&gui->fontinfo, output, outWidth, outHeight, outStride, scaleX, scaleY, glyph_index);
+
+    return num_packed;
+}
+#endif
 
 // Get cached rect. Rasters the rect to an atlas if not already cached
 // TODO: also compare font id & font height
-atlas_rect* get_glyph_rect(GUI* gui, uint32_t glyph_index)
+atlas_rect* get_glyph_rect(GUI* gui, uint32_t glyph_index, int font_size)
 {
     atlas_rect* rect      = NULL;
     const int   num_rects = xarr_len(gui->rects);
@@ -352,7 +475,7 @@ atlas_rect* get_glyph_rect(GUI* gui, uint32_t glyph_index)
             return rect;
         }
     }
-    int did_raster = raster_glyph(gui, glyph_index);
+    int did_raster = raster_glyph(gui, glyph_index, font_size);
     if (did_raster)
     {
         xassert(num_rects + 1 == xarr_len(gui->rects));
@@ -361,9 +484,9 @@ atlas_rect* get_glyph_rect(GUI* gui, uint32_t glyph_index)
     return rect;
 }
 
-void draw_glyph(GUI* gui, unsigned glyph_idx, int pen_x, int pen_y)
+void draw_glyph(GUI* gui, unsigned glyph_idx, int pen_x, int pen_y, int font_size)
 {
-    atlas_rect* rect = get_glyph_rect(gui, glyph_idx);
+    atlas_rect* rect = get_glyph_rect(gui, glyph_idx, font_size);
 
     if (rect)
     {
@@ -515,11 +638,12 @@ void* pw_create_gui(void* _plugin, void* _pw)
             .size                = sizeof(gui->indices),
             .label               = "img-indices"});
 
-#if defined(__APPLE__)
-        sg_shader shd = sg_make_shader(text_singlechannel_shader_desc(sg_query_backend()));
-#else
+#if defined(RASTER_FREETYPE_MULTICHANNEL)
         sg_shader shd = sg_make_shader(text_multichannel_shader_desc(sg_query_backend()));
+#else
+        sg_shader shd = sg_make_shader(text_singlechannel_shader_desc(sg_query_backend()));
 #endif
+
         sg_pipeline_desc pip_desc = {
             .shader     = shd,
             .index_type = SG_INDEXTYPE_UINT16,
@@ -530,7 +654,15 @@ void* pw_create_gui(void* _plugin, void* _pw)
             .label = "img-pipeline"};
         xstatic_assert(ATTR_text_singlechannel_position == ATTR_text_multichannel_position);
         xstatic_assert(ATTR_text_singlechannel_texcoord0 == ATTR_text_multichannel_texcoord0);
-#if defined(__APPLE__)
+#if defined(RASTER_FREETYPE_MULTICHANNEL)
+        pip_desc.colors[0] = (sg_color_target_state){
+            .write_mask = SG_COLORMASK_RGB,
+            .blend      = {
+                     .enabled        = true,
+                     .src_factor_rgb = SG_BLENDFACTOR_ONE,
+                     .dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_COLOR,
+            }};
+#else
         pip_desc.colors[0] = (sg_color_target_state){
             .write_mask = SG_COLORMASK_RGBA,
             .blend      = {
@@ -540,20 +672,10 @@ void* pw_create_gui(void* _plugin, void* _pw)
                      .dst_factor_rgb   = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
                      .dst_factor_alpha = SG_BLENDFACTOR_ONE,
             }};
-#else
-        pip_desc.colors[0] = (sg_color_target_state){
-            .write_mask = SG_COLORMASK_RGB,
-            .blend      = {
-                     .enabled        = true,
-                     .src_factor_rgb = SG_BLENDFACTOR_ONE,
-                     .dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_COLOR,
-            }};
+
 #endif
         gui->text_pip = sg_make_pipeline(&pip_desc);
     }
-
-    int err = FT_Init_FreeType(&gui->ft_lib);
-    xassert(!err);
 
 #if defined(_WIN32)
     // const char* font_path = "C:\\Windows\\Fonts\\arialbd.ttf";
@@ -566,43 +688,60 @@ void* pw_create_gui(void* _plugin, void* _pw)
 #elif defined(__APPLE__)
     const char* font_path = "/Library/Fonts/Arial Unicode.ttf";
 #endif
-
     xassert(xfiles_exists(font_path));
-    err = FT_New_Face(gui->ft_lib, font_path, 0, &gui->ft_face);
-    xassert(!err);
-    println("Found %ld glyphs", gui->ft_face->num_glyphs);
 
-    const float DPI = 96;
-    FT_Set_Char_Size(gui->ft_face, 0, FONT_SIZE * 64 * PLATFORM_BACKING_SCALE_FACTOR, DPI, DPI);
-
-    gui->current_atlas.idx = 0;
-    xarr_setcap(gui->glyph_atlases, 16);
-    xarr_setlen(gui->glyph_atlases, 1);
-    gui->glyph_atlases[0] = glyph_atlas_new();
-
-    xarr_setlen(gui->current_atlas.nodes, (ATLAS_WIDTH * 2));
-    gui->current_atlas.img_data = xcalloc(1, ATLAS_HEIGHT * ATLAS_ROW_STRIDE);
-    stbrp_init_target(
-        &gui->current_atlas.ctx,
-        ATLAS_WIDTH,
-        ATLAS_HEIGHT,
-        gui->current_atlas.nodes,
-        xarr_len(gui->current_atlas.nodes));
-
-    // Pre-render standard latin
-    // from "!" to "~" https://www.ascii-code.com/
-    for (int codepoint = 33; codepoint < 127; codepoint++)
+    if (xfiles_read(font_path, &gui->fontdata, &gui->fontdata_size))
     {
-        FT_UInt glyph_index = FT_Get_Char_Index(gui->ft_face, codepoint);
-        raster_glyph(gui, glyph_index);
-    }
+#ifdef RASTER_FREETYPE
+        int err = FT_Init_FreeType(&gui->ft_lib);
+        xassert(!err);
+        err = FT_New_Memory_Face(gui->ft_lib, gui->fontdata, gui->fontdata_size, 0, &gui->ft_face);
+        xassert(!err);
+        println("Found %ld glyphs", gui->ft_face->num_glyphs);
 
-#ifndef USE_HARFBUZZ
-    // Open a font file
-    // gui->kb_font  = kbts_FontFromFile(font_path);
-    gui->kb_context = kbts_CreateShapeContext(0, 0);
-    kbts_ShapePushFontFromFile(gui->kb_context, font_path, 0);
+#endif // RASTER_FREETYPE
+#ifdef RASTER_STB_TRUETYPE
+        int offset = stbtt_GetFontOffsetForIndex(gui->fontdata, 0);
+        xassert(offset != -1);
+        if (offset != -1)
+        {
+            int ok = stbtt_InitFont(&gui->fontinfo, gui->fontdata, offset);
+            xassert(ok != 0);
+        }
 #endif
+
+        gui->current_atlas.idx = 0;
+        xarr_setcap(gui->glyph_atlases, 16);
+        xarr_setlen(gui->glyph_atlases, 1);
+        gui->glyph_atlases[0] = glyph_atlas_new();
+
+        xarr_setlen(gui->current_atlas.nodes, (ATLAS_WIDTH * 2));
+        gui->current_atlas.img_data = xcalloc(1, ATLAS_HEIGHT * ATLAS_ROW_STRIDE);
+        stbrp_init_target(
+            &gui->current_atlas.ctx,
+            ATLAS_WIDTH,
+            ATLAS_HEIGHT,
+            gui->current_atlas.nodes,
+            xarr_len(gui->current_atlas.nodes));
+
+        // Pre-render standard latin
+        // from "!" to "~" https://www.ascii-code.com/
+        for (int codepoint = 33; codepoint < 127; codepoint++)
+        {
+#if defined(RASTER_FREETYPE)
+            FT_UInt glyph_index = FT_Get_Char_Index(gui->ft_face, codepoint);
+#elif defined(RASTER_STB_TRUETYPE)
+            uint32_t glyph_index = stbtt_FindGlyphIndex(&gui->fontinfo, codepoint);
+#endif
+            raster_glyph(gui, glyph_index, FONT_SIZE);
+        }
+
+        // Open a font file
+        // gui->kb_font  = kbts_FontFromFile(font_path);
+        gui->kb_context = kbts_CreateShapeContext(0, 0);
+        // kbts_ShapePushFontFromFile(gui->kb_context, font_path, 0);
+        kbts_ShapePushFontFromMemory(gui->kb_context, gui->fontdata, gui->fontdata_size, 0);
+    }
 
     gui->img_pip         = sg_make_pipeline(&(sg_pipeline_desc){
                 .shader = sg_make_shader(texread_shader_desc(sg_query_backend())),
@@ -645,12 +784,16 @@ void pw_destroy_gui(void* _gui)
     xarr_free(gui->rects);
     xarr_free(gui->glyph_atlases);
 
+#ifdef RASTER_FREETYPE
     int error = FT_Done_Face(gui->ft_face);
     xassert(!error);
     error = FT_Done_FreeType(gui->ft_lib);
     xassert(!error);
+#endif // RASTER_FREETYPE
 
     kbts_DestroyShapeContext(gui->kb_context);
+
+    XFILES_FREE(gui->fontdata);
 
     gui->plugin->gui = NULL;
     MY_FREE(gui);
@@ -721,22 +864,38 @@ void pw_tick(void* _gui)
 
     size_t my_text_len = strlen(MY_TEXT);
 
-    int max_font_height_pixels = (gui->ft_face->size->metrics.ascender - gui->ft_face->size->metrics.descender) >> 6;
+    kbts_ShapeBegin(gui->kb_context, KBTS_DIRECTION_DONT_KNOW, KBTS_LANGUAGE_DONT_KNOW);
+    kbts_ShapeUtf8(gui->kb_context, MY_TEXT, my_text_len, KBTS_USER_ID_GENERATION_MODE_CODEPOINT_INDEX);
+    kbts_ShapeEnd(gui->kb_context);
 
     int pen_x = 0;
-    int pen_y = max_font_height_pixels + (gui->ft_face->size->metrics.descender >> 6);
+    int pen_y = 0;
+
+#if defined(RASTER_FREETYPE)
+    const FT_Size_Metrics* FtSizeMetrics = &gui->ft_face->size->metrics;
+    int                    x_scale       = FtSizeMetrics->x_scale;
+    int                    y_scale       = FtSizeMetrics->y_scale;
+
+    int max_font_height_pixels = (gui->ft_face->size->metrics.ascender - gui->ft_face->size->metrics.descender) >> 6;
+    pen_y                      = max_font_height_pixels + (gui->ft_face->size->metrics.descender >> 6);
+#endif
+#if defined(RASTER_STB_TRUETYPE)
+    int ascent = 0, descent = 0, lineGap = 0;
+    stbtt_GetFontVMetrics(&gui->fontinfo, &ascent, &descent, &lineGap);
+
+    int max_font_height_pixels = (ascent + descent) >> 6;
+    pen_y                      = max_font_height_pixels + (descent >> 6);
+
+    // TODO: figure out hwo to scale with STB_TRUETYPE
+    int x_scale = 32768;
+    int y_scale = 32768;
+#endif
 
     // Move pen to centre of gui
     // pen_x += 10;             // padding
     pen_x  = gui_width / 2;  // padding
     pen_y += gui_height / 2; // Vertical centre
     pen_y -= FONT_SIZE / 2;
-
-    kbts_ShapeBegin(gui->kb_context, KBTS_DIRECTION_DONT_KNOW, KBTS_LANGUAGE_DONT_KNOW);
-    kbts_ShapeUtf8(gui->kb_context, MY_TEXT, my_text_len, KBTS_USER_ID_GENERATION_MODE_CODEPOINT_INDEX);
-    kbts_ShapeEnd(gui->kb_context);
-
-    const FT_Size_Metrics* FtSizeMetrics = &gui->ft_face->size->metrics;
 
     // Layout runs naively left to right.
     kbts_run Run;
@@ -749,11 +908,11 @@ void pw_tick(void* _gui)
             int GlyphX = CursorX + Glyph->OffsetX;
             int GlyphY = CursorY + Glyph->OffsetY;
 
-            int glyph_x  = ((GlyphX >> 6) * FtSizeMetrics->x_scale) >> 16;
-            int glyph_y  = ((GlyphY >> 6) * FtSizeMetrics->y_scale) >> 16;
+            int glyph_x  = ((GlyphX >> 6) * x_scale) >> 16;
+            int glyph_y  = ((GlyphY >> 6) * y_scale) >> 16;
             glyph_x     /= PLATFORM_BACKING_SCALE_FACTOR;
             glyph_y     /= PLATFORM_BACKING_SCALE_FACTOR;
-            draw_glyph(gui, Glyph->Id, pen_x + glyph_x, pen_y + glyph_y);
+            draw_glyph(gui, Glyph->Id, pen_x + glyph_x, pen_y + glyph_y, FONT_SIZE);
 
             CursorX += Glyph->AdvanceX;
             CursorY += Glyph->AdvanceY;

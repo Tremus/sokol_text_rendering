@@ -81,6 +81,9 @@ void println(const char* const fmt, ...);
 #define XARR_REALLOC(ptr, sz) MY_REALLOC(ptr, sz)
 #define XARR_FREE(ptr)        MY_FREE(ptr)
 
+#define STBTT_malloc(x, u) ((void)(u), MY_MALLOC(x))
+#define STBTT_free(x, u)   ((void)(u), MY_FREE(x))
+
 enum
 {
     // GUI_INIT_WIDTH  = 960,

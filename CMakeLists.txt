@@ -34,6 +34,7 @@ set(PLUGIN_SOURCES
     src/libs/kb_text_shape.c
     src/libs/stb_rect_pack.c
     src/libs/stb_image.c
+    src/libs/stb_truetype.c
     )
 
 set(PLUGIN_INCLUDE
