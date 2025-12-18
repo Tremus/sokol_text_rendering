@@ -16,5 +16,4 @@ typedef struct Plugin
     uint32_t max_block_size;
 } Plugin;
 
-
 bool is_main_thread();

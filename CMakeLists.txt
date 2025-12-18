@@ -35,6 +35,7 @@ set(PLUGIN_SOURCES
     src/libs/stb_rect_pack.c
     src/libs/stb_image.c
     src/libs/stb_truetype.c
+    src/text_rendering_layer.c
     )
 
 set(PLUGIN_INCLUDE
