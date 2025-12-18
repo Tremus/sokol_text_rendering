@@ -31,12 +31,12 @@
 // Use smaller atlases 128x128 (RGBA 64kb)
 
 // https://utf8everywhere.org/
-static const char* MY_TEXT = "abc";
+// static const char* MY_TEXT = "abc";
 // static const char* MY_TEXT = "Sphinx of black quartz, judge my vow";
 // static const char* MY_TEXT = "AV. .W.V.";
 // This used to display correctly in my IDE (VSCode) but it appears to be broken. kb_text_shape v1 couldn't properly
 // segment the text and struggled to correctly position the hebrew glyphs. v2.0 appears to be perfect! Hoorah
-// static const char* MY_TEXT = "Приве́т नमस्ते שָׁלוֹם  wow 🐨";
+static const char* MY_TEXT = "Приве́т नमस्ते שָׁלוֹם  wow 🐨";
 // static const char* MY_TEXT = "UTF8 Приве́т नमस्ते שָׁלוֹם";
 // static const char* MY_TEXT = "שָׁלוֹם";
 // static const char* MY_TEXT = "UTF8 Приве́т";

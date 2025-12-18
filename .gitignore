@@ -3,6 +3,9 @@
 .DS_Store
 .ideas
 .vscode
+.vs
 build
 dist
 src/shaders/*.h
+*.lib
+*.pdb

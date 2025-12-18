@@ -43,12 +43,10 @@ void println(const char* const fmt, ...);
 #endif
 
 #ifdef CPLUG_BUILD_STANDALONE
-#define XFILES_ASSERT xassert
-#define CPLUG_LOG_ASSERT(cond)                                                                                         \
-    if (!(cond))                                                                                                       \
-        (println("xassert(" #cond ")"), xassert((cond)));
+#define XFILES_ASSERT          xassert
+#define CPLUG_LOG_ASSERT(cond) xassert((cond));
 #else // !CPLUG_BUILD_STANDALONE
-#define XFILES_ASSERT(cond) CPLUG_LOG_ASSERT((cond))
+#define XFILES_ASSERT(cond) CPLUG_LOG_ASSERT(cond)
 #endif // CPLUG_BUILD_STANDALONE
 
 #define LOG_MALLOC(sz)       (println("malloc(%s) - %s:%d", #sz, __FILE__, __LINE__), xmalloc(sz))

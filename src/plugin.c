@@ -77,16 +77,16 @@ uint32_t cplug_getNumOutputBusses(void* ptr) { return 1; }
 uint32_t cplug_getInputBusChannelCount(void* p, uint32_t bus_idx) { return 2; }
 uint32_t cplug_getOutputBusChannelCount(void* p, uint32_t bus_idx) { return 2; }
 
-void cplug_getInputBusName(void*, uint32_t idx, char* buf, size_t buflen) { snprintf(buf, buflen, "Audio Input"); }
-void cplug_getOutputBusName(void*, uint32_t idx, char* buf, size_t buflen) { snprintf(buf, buflen, "Audio Output"); }
+void cplug_getInputBusName(void* ptr, uint32_t idx, char* buf, size_t buflen) { snprintf(buf, buflen, "Audio Input"); }
+void cplug_getOutputBusName(void* ptr, uint32_t idx, char* buf, size_t buflen) { snprintf(buf, buflen, "Audio Output"); }
 
-uint32_t cplug_getNumParameters(void*) { return 0; }
+uint32_t cplug_getNumParameters(void* p) { return 0; }
 uint32_t cplug_getParameterID(void* p, uint32_t paramIndex) { return paramIndex; }
 uint32_t cplug_getParameterFlags(void* p, uint32_t paramId) { return 0; }
 // NOTE: AUv2 supports a max length of 52 bytes, VST3 128, CLAP 256
-void cplug_getParameterName(void*, uint32_t paramId, char* buf, size_t buflen) { snprintf(buf, buflen, "N/A"); }
+void cplug_getParameterName(void* p, uint32_t paramId, char* buf, size_t buflen) { snprintf(buf, buflen, "N/A"); }
 
-void cplug_getParameterRange(void*, uint32_t paramId, double* min, double* max)
+void cplug_getParameterRange(void* p, uint32_t paramId, double* min, double* max)
 {
     *min = 0;
     *max = 1;
@@ -104,8 +104,6 @@ void   cplug_parameterValueToString(void* _p, uint32_t id, char* b, size_t sz, d
 
 uint32_t cplug_getLatencyInSamples(void* p) { return 0; }
 uint32_t cplug_getTailInSamples(void* p) { return 0; }
-
-#pragma mark -Audio
 
 void cplug_setSampleRateAndBlockSize(void* _p, double sampleRate, uint32_t maxBlockSize)
 {

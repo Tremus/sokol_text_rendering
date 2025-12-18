@@ -9,6 +9,8 @@ void       text_layer_destroy(TextLayer* gui);
 
 void text_layer_prerender_ascii(TextLayer* gui, float font_size);
 void text_layer_draw_text(TextLayer* gui, const char* text_start, const char* text_end, int x, int y, float font_size);
+
+// Handle all the buffer uploads etc
 void text_layer_draw(TextLayer* gui, sg_sampler sampler, int gui_width, int gui_height);
 
 #endif // TEXT_H
@@ -28,8 +30,8 @@ void text_layer_draw(TextLayer* gui, sg_sampler sampler, int gui_width, int gui_
 
 #if !defined(RASTER_STB_TRUETYPE) && !defined(RASTER_FREETYPE_SINGLECHANNEL) && !defined(RASTER_FREETYPE_MULTICHANNEL)
 // #define RASTER_STB_TRUETYPE
-// #define RASTER_FREETYPE_MULTICHANNEL
-#define RASTER_FREETYPE_SINGLECHANNEL
+#define RASTER_FREETYPE_MULTICHANNEL
+// #define RASTER_FREETYPE_SINGLECHANNEL
 #endif
 #if defined(RASTER_FREETYPE_SINGLECHANNEL) || defined(RASTER_FREETYPE_MULTICHANNEL)
 #define RASTER_FREETYPE
@@ -294,7 +296,7 @@ int raster_glyph(TextLayer* gui, uint32_t glyph_index, float font_size)
 }
 #endif // RASTER_FREETYPE
 #ifdef RASTER_STB_TRUETYPE
-int raster_glyph(GUI* gui, uint32_t glyph_index, float font_size)
+int raster_glyph(TextLayer* gui, uint32_t glyph_index, float font_size)
 {
     int num_packed = 0;
 
@@ -409,7 +411,6 @@ const atlas_rect* get_glyph_rect(TextLayer* gui, uint32_t glyph_index, float fon
     // sokol_gfx should assert in debug mode when trying to bind a texture view with an id of 0
     // In release it should skip all draws using that view. This is our desired behaviour
     static const atlas_rect stub_rect = {0};
-    xassert(false);
     return &stub_rect;
 }
 
@@ -467,6 +468,7 @@ TextLayer* text_layer_new(const char* font_path)
 {
     TextLayer* gui = xcalloc(1, sizeof(*gui));
 
+    xarr_setcap(gui->rects, 64);
     gui->text_sbo = sg_make_buffer(&(sg_buffer_desc){
         .usage.storage_buffer = true,
         .usage.stream_update  = true,
@@ -542,9 +544,7 @@ TextLayer* text_layer_new(const char* font_path)
             xarr_len(gui->current_atlas.nodes));
 
         // Open a font file
-        // gui->kb_font  = kbts_FontFromFile(font_path);
         gui->kb_context = kbts_CreateShapeContext(0, 0);
-        // kbts_ShapePushFontFromFile(gui->kb_context, font_path, 0);
         kbts_ShapePushFontFromMemory(gui->kb_context, gui->fontdata, gui->fontdata_size, 0);
     }
 

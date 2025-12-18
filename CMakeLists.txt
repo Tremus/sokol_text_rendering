@@ -71,87 +71,30 @@ endif()
 # ╚═╝     ╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝      ╚═╝   ╚═╝     ╚══════╝
 
 set(FREETYPE_SRC
-    # modules/freetype/src/bzip2/ftbzip2.c
-    modules/freetype/src/base/ftbdf.c
-    modules/freetype/src/base/ftbbox.c
-    modules/freetype/src/base/ftpatent.c
-    modules/freetype/src/base/ftcid.c
-    modules/freetype/src/base/ftwinfnt.c
-    modules/freetype/src/base/ftsynth.c
-    modules/freetype/src/base/ftmm.c
-    modules/freetype/src/base/ftstroke.c
-    modules/freetype/src/base/ftpfr.c
-    modules/freetype/src/base/ftfstype.c
-    modules/freetype/src/base/ftotval.c
-    modules/freetype/src/base/fttype1.c
-    modules/freetype/src/base/ftinit.c
-    modules/freetype/src/base/ftgxval.c
-    modules/freetype/src/base/ftgasp.c
-    modules/freetype/src/base/ftglyph.c
-    modules/freetype/src/base/ftbitmap.c
-    modules/freetype/src/bdf/bdf.c
-    modules/freetype/src/cache/ftcache.c
-    modules/freetype/src/cid/type1cid.c
-    modules/freetype/src/lzw/ftlzw.c
-    modules/freetype/src/svg/svg.c
-    modules/freetype/src/raster/raster.c
-    modules/freetype/src/winfonts/winfnt.c
-    modules/freetype/src/smooth/smooth.c
-    modules/freetype/src/pcf/pcf.c
-    modules/freetype/src/gzip/ftgzip.c
-    modules/freetype/src/pfr/pfr.c
     # modules/freetype/src/base/ftver.rc.res
-    modules/freetype/src/pshinter/pshinter.c
-    modules/freetype/src/type42/type42.c
-    modules/freetype/src/sdf/sdf.c
-    modules/freetype/src/cff/cff.c
-    modules/freetype/src/psnames/psnames.c
-    modules/freetype/src/autofit/autofit.c
-    modules/freetype/src/type1/type1.c
-    modules/freetype/src/base/ftbase.c
-    modules/freetype/src/psaux/psaux.c
-    modules/freetype/src/truetype/truetype.c
-    modules/freetype/src/sfnt/sfnt.c
+    freetype_scu.c
     )
 
-set(FREETYPE_DEFINES
-    FT_CONFIG_CONFIG_H=<freetype/config/ftconfig.h>
-    FT_CONFIG_OPTIONS_H=<freetype/config/ftoption.h>
-    FT_CONFIG_STANDARD_LIBRARY_H=<freetype/config/ftstdlib.h>
-    FT_CONFIG_MODULES_H=<freetype/config/ftmodule.h>
-    FT_BEGIN_HEADER=;
-    FT_END_HEADER=;
-    FT2_BUILD_LIBRARY
-)
+set(FREETYPE_INCLUDE
+    modules/freetype/include
+    modules/freetype/src/base
+    )
 
-set(FREETYPE_INCLUDE modules/freetype/include)
-if (WIN32)
-    list(APPEND FREETYPE_SRC
-        modules/freetype/builds/windows/ftdebug.c
-        modules/freetype/builds/windows/ftsystem.c
-        )
-    list(APPEND FREETYPE_DEFINES
-        _CRT_SECURE_NO_WARNINGS
-        )
-elseif(APPLE)
-    list(APPEND FREETYPE_SRC
-        modules/freetype/builds/mac/ftmac.c
-        modules/freetype/src/base/ftdebug.c
-        modules/freetype/builds/unix/ftsystem.c
-        )
-    list(APPEND FREETYPE_DEFINES
-        HAVE_FCNTL_H
-        HAVE_UNISTD_H
-        )
-    list(APPEND FREETYPE_INCLUDE modules/freetype/src/base)
-endif()
+add_library(freetype STATIC ${FREETYPE_SRC})
 
-add_library(freetype2 STATIC ${FREETYPE_SRC})
+target_include_directories(freetype PRIVATE ${FREETYPE_INCLUDE})
 
-target_include_directories(freetype2 PRIVATE ${FREETYPE_INCLUDE})
-target_compile_definitions(freetype2 PRIVATE ${FREETYPE_DEFINES})
 
-list(APPEND PLUGIN_LIBRARIES freetype2)
+# set(FT_DISABLE_ZLIB TRUE)
+# set(FT_DISABLE_BZIP2 TRUE)
+# set(FT_DISABLE_PNG TRUE)
+# set(FT_DISABLE_HARFBUZZ TRUE)
+# set(FT_DISABLE_BROTLI TRUE)
+# add_subdirectory(modules/freetype)
+
+# link_directories(libs)
+
+list(APPEND PLUGIN_LIBRARIES freetype)
 
 # ███████╗████████╗ █████╗ ███╗   ██╗██████╗  █████╗ ██╗      ██████╗ ███╗   ██╗███████╗
 # ██╔════╝╚══██╔══╝██╔══██╗████╗  ██║██╔══██╗██╔══██╗██║     ██╔═══██╗████╗  ██║██╔════╝
