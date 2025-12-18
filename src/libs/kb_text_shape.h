@@ -1,4 +1,4 @@
-/*  kb_text_shape - v2.01 - text segmentation and shaping
+/*  kb_text_shape - v2.05 - text segmentation and shaping
     by Jimmy Lefevre
 
     SECURITY
@@ -1245,6 +1245,11 @@
      See https://unicode.org/reports/tr9 for more information.
 
    VERSION HISTORY
+     2.05  - Fix custom allocator initialization for kbts_shape_context.PermanentArena.
+     2.04  - Fix Indic syllable logic for small/single-character syllables.
+             Fix wrong indirection in pointer code in Indic syllable logic.
+     2.03  - Fix loading blobs directly, fix a parsing edge case in GPOS format 2 subtables.
+     2.02  - Improve globbing of cursive attachments.
      2.01  - Add kbts_InitializeGlyphStorage and kbts_ScriptDirection.
              Rename some private functions for better namespacing.
              Delete some deprecated functions.
@@ -3406,7 +3411,7 @@ typedef struct kbts_glyph_classes
   kbts_u16 MarkAttachmentClass;
 } kbts_glyph_classes;
 
-struct kbts_glyph
+typedef struct kbts_glyph
 {
   kbts_glyph *Prev;
   kbts_glyph *Next;
@@ -3476,7 +3481,7 @@ struct kbts_glyph
   kbts_u8 CombiningClass;
 
   kbts_u8 MarkOrdering; // Only used temporarily in NORMALIZE for Arabic mark reordering.
-};
+} kbts_glyph;
 
 typedef struct kbts_shape_codepoint
 {
@@ -3532,7 +3537,7 @@ typedef struct kbts_arena
   int Error;
 } kbts_arena;
 
-struct kbts_glyph_storage
+typedef struct kbts_glyph_storage
 {
   kbts_arena Arena;
 
@@ -3540,7 +3545,7 @@ struct kbts_glyph_storage
   kbts_glyph FreeGlyphSentinel;
 
   int Error;
-};
+} kbts_glyph_storage;
 
 typedef struct kbts_glyph_parent
 {
@@ -15333,7 +15338,7 @@ typedef struct kbts__feature_override
   int Value;
 } kbts__feature_override;
 
-struct kbts_glyph_config
+typedef struct kbts_glyph_config
 {
   kbts__feature_set EnabledFeatures;
   kbts__feature_set DisabledFeatures;
@@ -15344,7 +15349,7 @@ struct kbts_glyph_config
   void *AllocatorData;
 
   kbts__feature_override_header FeatureOverrideSentinel;
-};
+} kbts_glyph_config;
 
 typedef struct kbts__arena_block
 {
@@ -15460,7 +15465,7 @@ typedef struct kbts__context_font
   kbts__arena_lifetime Lifetime;
 } kbts__context_font;
 
-struct kbts_shape_context
+typedef struct kbts_shape_context
 {
   kbts_arena PermanentArena;
   kbts_arena FontArena;
@@ -15525,7 +15530,7 @@ struct kbts_shape_context
   kbts_u32 FrameCount;
 
   kbts_shape_error Error;
-};
+} kbts_shape_context;
 
 typedef struct kbts__indic_script_properties
 {
@@ -15538,7 +15543,7 @@ typedef struct kbts__indic_script_properties
   kbts__syllabic_position BelowBaseMatraPosition;
 } kbts__indic_script_properties;
 
-struct kbts_shape_config
+typedef struct kbts_shape_config
 {
   kbts_allocator_function *Allocator;
   void *AllocatorData;
@@ -15574,7 +15579,7 @@ struct kbts_shape_config
   kbts_glyph SaraAa;
 
   kbts__baked_feature_stage *FeatureStages; // [OpList.FeatureStageCount]
-};
+} kbts_shape_config;
 
 static const kbts_u8 kbts__CmapFormatPrecedence[14] = {1, 0, 1, 0, 2, 0, 1, 0, 3, 0, 3, 0, 4, 5};
 
@@ -15697,6 +15702,7 @@ static int kbts__ByteSwapArray16(kbts_u16 *Array, kbts_un Count, char *End)
     kbts__ByteSwapArray16Unchecked(Array, Count);
     Result = 1;
   }
+
   return Result;
 }
 
@@ -15827,13 +15833,13 @@ typedef struct kbts__langsys_record
   kbts_u16 Offset;
 } kbts__langsys_record;
 
-struct kbts__langsys
+typedef struct kbts__langsys
 {
   kbts_u16 LookupOrderOffset; // reserved
   kbts_u16 RequiredFeatureIndex;
   kbts_u16 FeatureIndexCount;
   // kbts_u16 FeatureIndices[FeatureIndexCount];
-};
+} kbts__langsys;
 
 typedef struct kbts__feature_list
 {
@@ -15847,12 +15853,12 @@ typedef struct kbts__feature_record
   kbts_u16 Offset;
 } kbts__feature_record;
 
-struct kbts__feature
+typedef struct kbts__feature
 {
   kbts_u16 FeatureParamsOffset;
   kbts_u16 LookupIndexCount;
   // kbts_u16 LookupIndices[LookupIndexCount];
-};
+} kbts__feature;
 
 typedef struct kbts_lookup_list
 {
@@ -16209,13 +16215,13 @@ typedef struct kbts__sequential_map_group
   kbts_u32 StartGlyphId;
 } kbts__sequential_map_group;
 
-struct kbts__cmap_14
+typedef struct kbts__cmap_14
 {
   kbts_u16 Format;
   kbts_u32 Length;
   kbts_u32 SelectorCount;
   // kbts__variation_selector Selectors[SelectorCount];
-};
+} kbts__cmap_14;
 
 typedef struct kbts__variation_selector
 {
@@ -16248,7 +16254,7 @@ typedef struct kbts__uvs_mapping
   kbts_u16 GlyphId;
 } kbts__uvs_mapping;
 
-struct kbts__gsub_gpos
+typedef struct kbts__gsub_gpos
 {
   kbts_u16 Major;
   kbts_u16 Minor;
@@ -16256,7 +16262,7 @@ struct kbts__gsub_gpos
   kbts_u16 FeatureListOffset;
   kbts_u16 LookupListOffset;
   kbts_u32 FeatureVariationsOffset; // Only present in v1.1
-};
+} kbts__gsub_gpos;
 
 typedef struct kbts__single_substitution
 {
@@ -16346,7 +16352,7 @@ typedef struct kbts__mark_glyph_sets
   // kbts_u32 CoverageOffsets[MarkGlyphSetCount];
 } kbts__mark_glyph_sets;
 
-struct kbts__gdef
+typedef struct kbts__gdef
 {
   kbts_u16 Major;
   kbts_u16 Minor;
@@ -16356,7 +16362,7 @@ struct kbts__gdef
   kbts_u16 MarkAttachmentClassDefinitionOffset; // May be 0
   kbts_u16 MarkGlyphSetsDefinitionOffset;       // v1.2 and up; may be 0
   kbts_u32 ItemVariationStoreOffset;            // v1.3 and up; may be 0
-};
+} kbts__gdef;
 
 typedef struct kbts__anchor
 {
@@ -16516,7 +16522,7 @@ struct kbts__head
   kbts_s16 GlyphDataFormat; // Only 0 is defined.
 };
 
-struct kbts__hea
+typedef struct kbts__hea
 {
   kbts_u16 Major;
   kbts_u16 Minor;
@@ -16540,7 +16546,7 @@ struct kbts__hea
 
   kbts_s16 MetricDataFormat;
   kbts_u16 MetricCount;
-};
+} kbts__hea;
 
 typedef struct kbts__os2
 {
@@ -16617,7 +16623,7 @@ typedef struct kbts__name
   // kbts__lang_tag_record LangTags[LangTagCount];
 } kbts__name;
 
-struct kbts__maxp
+typedef struct kbts__maxp
 {
   kbts_u16 Major;
   kbts_u16 Minor;
@@ -16637,7 +16643,7 @@ struct kbts__maxp
   kbts_u16 MaximumInstructionSize;
   kbts_u16 MaximumTopLevelComponentCount;
   kbts_u16 MaximumComponentDepth;
-};
+} kbts__maxp;
 
 #  pragma pack(pop)
 
@@ -18639,9 +18645,9 @@ static void kbts__ByteSwapGposLookupSubtable(kbts__byteswap_context *Context, kb
               PairRecord->SecondGlyph = kbts__ByteSwap16(PairRecord->SecondGlyph);
               kbts_u16 *Record = KBTS__POINTER_AFTER(kbts_u16, PairRecord);
 
-              kbts__unpacked_value_record Unpacked1 = kbts_ByteSwapValueRecord(Context, Record, Adjust->ValueFormat1, Record);
+              kbts__unpacked_value_record Unpacked1 = kbts_ByteSwapValueRecord(Context, Set, Adjust->ValueFormat1, Record);
               Record += Unpacked1.Size;
-              kbts_ByteSwapValueRecord(Context, Record, Adjust->ValueFormat2, Record);
+              kbts_ByteSwapValueRecord(Context, Set, Adjust->ValueFormat2, Record);
             }
           }
         }
@@ -20200,6 +20206,25 @@ static void kbts__SetLookupOnePastLastGlyph(kbts__shape_scratchpad *Scratchpad, 
   }
 }
 
+typedef kbts_u32 kbts__cursive_flags;
+enum kbts__cursive_flags_enum
+{
+  KBTS__CURSIVE_FLAG_NONE,
+  KBTS__CURSIVE_FLAG_START = (1 << 0),
+  KBTS__CURSIVE_FLAG_END = (1 << 1),
+};
+
+KBTS_INLINE kbts__cursive_flags kbts__GetCursiveFlags(kbts_glyph *Glyph)
+{
+  kbts__cursive_flags Result = (kbts__cursive_flags)Glyph->MarkOrdering;
+  return Result;
+}
+
+KBTS_INLINE void kbts__SetCursiveFlags(kbts_glyph *Glyph, kbts__cursive_flags CursiveFlags)
+{
+  Glyph->MarkOrdering = (kbts_u8)CursiveFlags;
+}
+
 static int kbts__DoSingleAdjustment(kbts__shape_scratchpad *Scratchpad, kbts_shape_config *Config, kbts_glyph_storage *Storage,
                                    kbts_lookup_list *LookupList, kbts_un LookupIndex, kbts_un SubtableIndex, kbts__unpacked_lookup *Lookup, kbts_u16 *Base,
                                    kbts_glyph *CurrentGlyph, kbts_un StartIndex, kbts__skip_flags RequestedSkipFlags)
@@ -20446,15 +20471,18 @@ static int kbts__DoSingleAdjustment(kbts__shape_scratchpad *Scratchpad, kbts_sha
               Prev->AdvanceX = Advance0X;
               Prev->OffsetX = Offset0X;
               Prev->Flags |= (KBTS_GLYPH_FLAG_CURSIVE | KBTS_GLYPH_FLAG_USED_IN_GPOS | KBTS_GLYPH_FLAG_NO_BREAK);
+              kbts__SetCursiveFlags(Prev, KBTS__CURSIVE_FLAG_START);
               CurrentGlyph->AdvanceX = Advance1X;
               CurrentGlyph->OffsetX = Offset1X;
-              CurrentGlyph->Flags |= (KBTS_GLYPH_FLAG_CURSIVE | KBTS_GLYPH_FLAG_USED_IN_GPOS);
+              CurrentGlyph->Flags |= KBTS_GLYPH_FLAG_CURSIVE | KBTS_GLYPH_FLAG_USED_IN_GPOS;
+              kbts__SetCursiveFlags(CurrentGlyph, KBTS__CURSIVE_FLAG_END);
 
               for(kbts_glyph *CursiveGlyph = Prev->Next;
                   CursiveGlyph != CurrentGlyph;
                   CursiveGlyph = CursiveGlyph->Next)
               {
                 CursiveGlyph->Flags |= KBTS_GLYPH_FLAG_NO_BREAK;
+                kbts__SetCursiveFlags(CursiveGlyph, 0);
               }
 
               // The second part is aligning the newly-formed cursive cluster to the "baseline". It is trickier than you'd expect.
@@ -20474,6 +20502,7 @@ static int kbts__DoSingleAdjustment(kbts__shape_scratchpad *Scratchpad, kbts_sha
               kbts_s32 CursiveDy = 0;
               kbts_glyph *CursiveGlyph = CurrentGlyph;
               int Backward = 0;
+              kbts_u32 AdjustNearbyGlyphs = (CurrentGlyph->Flags & KBTS_GLYPH_FLAG_CURSIVE);
 
               if(!(Lookup->Flags & KBTS__LOOKUP_FLAG_RIGHT_TO_LEFT))
               {
@@ -20486,20 +20515,37 @@ static int kbts__DoSingleAdjustment(kbts__shape_scratchpad *Scratchpad, kbts_sha
                 CursiveDy = NewOffset0Y - Offset0Y;
                 Backward = 1;
                 CursiveGlyph = Prev;
+                AdjustNearbyGlyphs = 1;
               }
 
-              while(kbts__GlyphIsValid(Storage, CursiveGlyph))
-              {
-                if(CursiveGlyph->Flags & KBTS_GLYPH_FLAG_CURSIVE)
-                {
-                  CursiveGlyph->OffsetY += CursiveDy;
-                }
-                else if(CursiveGlyph->AdvanceX | CursiveGlyph->AdvanceY) // Ignore marks.
-                {
-                  break;
-                }
+              CursiveGlyph->OffsetY += CursiveDy;
 
+              if(AdjustNearbyGlyphs)
+              {
+                kbts__SetCursiveFlags(CursiveGlyph, 0);
                 CursiveGlyph = Backward ? CursiveGlyph->Prev : CursiveGlyph->Next;
+
+                kbts__cursive_flags StopFlag = Backward ? KBTS__CURSIVE_FLAG_END : KBTS__CURSIVE_FLAG_START;
+
+                while(kbts__GlyphIsValid(Storage, CursiveGlyph))
+                {
+                  kbts__cursive_flags CursiveFlags = kbts__GetCursiveFlags(CursiveGlyph);
+
+                  if(CursiveFlags & StopFlag)
+                  {
+                    break;
+                  }
+                  else if(CursiveGlyph->Flags & KBTS_GLYPH_FLAG_CURSIVE)
+                  {
+                    CursiveGlyph->OffsetY += CursiveDy;
+                  }
+                  else if(!(CursiveGlyph->Classes.Class & KBTS__GLYPH_CLASS_MARK)) // Ignore marks.
+                  {
+                    break;
+                  }
+
+                  CursiveGlyph = Backward ? CursiveGlyph->Prev : CursiveGlyph->Next;
+                }
               }
 
               Result = 1;
@@ -22652,6 +22698,8 @@ static void kbts__ExecuteOp(kbts__shape_scratchpad *Scratchpad, kbts_shape_confi
 
       KBTS__FOR_GLYPH(Storage, Glyph)
       {
+        kbts__SetCursiveFlags(Glyph, 0);
+
         kbts__long_mtx Metric = DefaultMetric;
         if(LongMetrics)
         {
@@ -23127,20 +23175,33 @@ static kbts_glyph *kbts__BeginCluster(kbts__shape_scratchpad *Scratchpad, kbts_s
 
         case KBTS__REPH_ENCODING_IMPLICIT:
           if((ScanGlyphIndex >= 2) &&
-             (Second->SyllabicClass == KBTS_INDIC_SYLLABIC_CLASS_HALANT) &&
-             kbts__WouldSubstitute(Scratchpad, Config, Storage, LookupList, Frames, Rphf, 0, FirstGlyphs[0], 2))
+             (Second->SyllabicClass == KBTS_INDIC_SYLLABIC_CLASS_HALANT))
           {
-            OnePastRephIndex = 2;
+            kbts_glyph Scratch[2];
+            Scratch[0] = *FirstGlyphs[0];
+            Scratch[1] = *FirstGlyphs[1];
+
+            if(kbts__WouldSubstitute(Scratchpad, Config, Storage, LookupList, Frames, Rphf, 0, Scratch, 2))
+            {
+              OnePastRephIndex = 2;
+            }
           }
           break;
 
         case KBTS__REPH_ENCODING_EXPLICIT:
           if((ScanGlyphIndex >= 3) &&
              (Second->SyllabicClass == KBTS_INDIC_SYLLABIC_CLASS_HALANT) &&
-             (Third->SyllabicClass == KBTS_INDIC_SYLLABIC_CLASS_ZWJ) &&
-             kbts__WouldSubstitute(Scratchpad, Config, Storage, LookupList, Frames, Rphf, 0, FirstGlyphs[0], 3))
+             (Third->SyllabicClass == KBTS_INDIC_SYLLABIC_CLASS_ZWJ))
           {
-            OnePastRephIndex = 3;
+            kbts_glyph Scratch[3];
+            Scratch[0] = *FirstGlyphs[0];
+            Scratch[1] = *FirstGlyphs[1];
+            Scratch[2] = *FirstGlyphs[2];
+
+            if(kbts__WouldSubstitute(Scratchpad, Config, Storage, LookupList, Frames, Rphf, 0, Scratch, 3))
+            {
+              OnePastRephIndex = 3;
+            }
           }
           break;
         }
@@ -24023,6 +24084,7 @@ static void kbts__EndCluster(kbts__shape_scratchpad *Scratchpad, kbts_shape_conf
     kbts_glyph *First = Storage->GlyphSentinel.Next;
     kbts_glyph *Second = First->Next;
     if((First->SyllabicPosition == KBTS__SYLLABIC_POSITION_RA_TO_BECOME_REPH) &&
+       kbts__GlyphIsValid(Storage, Second) &&
        (Second->SyllabicPosition != KBTS__SYLLABIC_POSITION_RA_TO_BECOME_REPH))
     {
       kbts__reph_position RephPosition = Config->IndicScriptProperties.RephPosition;
@@ -24960,6 +25022,9 @@ KBTS_EXPORT kbts_shape_context *kbts_PlaceShapeContext(kbts_allocator_function *
 
     KBTS_MEMSET(Result, 0, sizeof(*Result));
 
+    Result->PermanentArena.Allocator = Allocator;
+    Result->PermanentArena.AllocatorData = AllocatorData;
+
     Result->FontArena.Allocator = Allocator;
     Result->FontArena.AllocatorData = AllocatorData;
 
@@ -24968,6 +25033,9 @@ KBTS_EXPORT kbts_shape_context *kbts_PlaceShapeContext(kbts_allocator_function *
 
     Result->ScratchArena.Allocator = Allocator;
     Result->ScratchArena.AllocatorData = AllocatorData;
+
+    Result->GlyphStorage.Arena.Allocator = Allocator;
+    Result->GlyphStorage.Arena.AllocatorData = AllocatorData;
 
     KBTS__DLLIST_SENTINEL_INIT(&Result->FeatureOverrideSentinel);
     KBTS__DLLIST_SENTINEL_INIT(&Result->FreeFeatureOverrideSentinel);
@@ -25010,6 +25078,7 @@ KBTS_EXPORT void kbts_DestroyShapeContext(kbts_shape_context *Context)
 {
   if(Context)
   {
+    kbts__FreeArena(&Context->PermanentArena);
     kbts__FreeArena(&Context->ConfigArena);
     kbts__FreeArena(&Context->ScratchArena);
     kbts__FreeArena(&Context->FontArena);
@@ -26356,6 +26425,68 @@ KBTS_EXPORT int kbts_FontCount(void *Data, int Size)
   return Result;
 }
 
+static kbts__cmap_subtable_pointer kbts__SelectCmapSubtable(kbts_blob_header *Header, kbts_blob_table *CmapTable, kbts__cmap_14 **Cmap14, kbts_u16 *ResultFormat)
+{
+  kbts__cmap_subtable_pointer Result = KBTS__ZERO;
+
+  if(CmapTable->Length >= sizeof(kbts__cmap))
+  {
+    char *TableEnd = KBTS__POINTER_OFFSET(char, Header, CmapTable->OffsetFromStartOfFile + CmapTable->Length);
+    kbts__cmap *Cmap = KBTS__POINTER_OFFSET(kbts__cmap, Header, CmapTable->OffsetFromStartOfFile);
+
+    kbts_u16 PreferredFormat = 1;
+    KBTS__FOR(It, 0, Cmap->TableCount)
+    {
+      kbts__cmap_subtable_pointer Subtable = kbts__GetCmapSubtable(Cmap, It);
+      if((char *)(Subtable.Subtable + 1) <= TableEnd)
+      {
+        kbts_u16 Format = *Subtable.Subtable;
+
+        // This is kind of iffy, but the statelessness is useful for selecting
+        // the cmap from an already-prepared blob without having to deal with
+        // the byteswap context.
+        if((Format > 0xFF) && 
+           ((Format >> 8) <= 14))
+        {
+          Format = kbts__ByteSwap16(Format);
+          *Subtable.Subtable = Format;
+        }
+
+        if(Format == 14)
+        {
+          if((char *)(Subtable.Subtable + sizeof(kbts__cmap_14)) <= TableEnd)
+          {
+            if(Cmap14)
+            {
+              *Cmap14 = (kbts__cmap_14 *)Subtable.Subtable;
+            }
+          }
+        }
+        else if(!Result.Subtable)
+        {
+          Result = Subtable;
+        }
+        else if(Format < KBTS__ARRAY_LENGTH(kbts__CmapFormatPrecedence))
+        {
+          kbts_u16 Precedence = kbts__CmapFormatPrecedence[Format];
+          kbts_u16 PreferredPrecedence = kbts__CmapFormatPrecedence[PreferredFormat];
+
+          if((Precedence > PreferredPrecedence) || ((Precedence == PreferredPrecedence) && (Subtable.PlatformId == 3)))
+          {
+            Result = Subtable;
+            if(ResultFormat)
+            {
+              *ResultFormat = Format;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return Result;
+}
+
 KBTS_EXPORT kbts_load_font_error kbts_LoadFont(kbts_font *Font, kbts_load_font_state *State, void *FontData, int FontDataSize, int FontIndex, int *ScratchSize_, int *OutputSize_)
 {
   kbts_load_font_error Result = 0;
@@ -26525,6 +26656,8 @@ KBTS_EXPORT kbts_load_font_error kbts_LoadFont(kbts_font *Font, kbts_load_font_s
       // @Incomplete: Bounds check or something.
 
       Font->Blob = Header;
+      kbts__cmap_subtable_pointer PreferredSubtable = kbts__SelectCmapSubtable(Header, &Header->Tables[KBTS_BLOB_TABLE_ID_CMAP], &Font->Cmap14, 0);
+      Font->Cmap = PreferredSubtable.Subtable;
     }
   }
 
@@ -26724,43 +26857,11 @@ KBTS_EXPORT kbts_load_font_error kbts_PlaceBlob(kbts_font *Font, kbts_load_font_
               Record->SubtableOffset = kbts__ByteSwap32(Record->SubtableOffset);
             }
 
-            kbts__cmap_subtable_pointer PreferredSubtable = KBTS__ZERO;
             kbts_u16 PreferredFormat = 1;
-            KBTS__FOR(It, 0, Cmap->TableCount)
-            {
-              kbts__cmap_subtable_pointer Subtable = kbts__GetCmapSubtable(Cmap, It);
-              if((char *)(Subtable.Subtable + 1) <= TableEnd)
-              {
-                kbts_u16 Format = kbts__ByteSwap16(*Subtable.Subtable);
 
-                if(Format == 14)
-                {
-                  if((char *)(Subtable.Subtable + sizeof(kbts__cmap_14)) <= TableEnd)
-                  {
-                    Font->Cmap14 = (kbts__cmap_14 *)Subtable.Subtable;
-                  }
-                }
-                else if(!PreferredSubtable.Subtable)
-                {
-                  PreferredSubtable = Subtable;
-                }
-                else if(Format < KBTS__ARRAY_LENGTH(kbts__CmapFormatPrecedence))
-                {
-                  kbts_u16 Precedence = kbts__CmapFormatPrecedence[Format];
-                  kbts_u16 PreferredPrecedence = kbts__CmapFormatPrecedence[PreferredFormat];
-
-                  if((Precedence > PreferredPrecedence) || ((Precedence == PreferredPrecedence) && (Subtable.PlatformId == 3)))
-                  {
-                    PreferredSubtable = Subtable;
-                    PreferredFormat = Format;
-                  }
-                }
-              }
-            }
-
+            kbts__cmap_subtable_pointer PreferredSubtable = kbts__SelectCmapSubtable(Header, CmapTable, &Font->Cmap14, &PreferredFormat);
             if(PreferredSubtable.Subtable)
             {
-              *PreferredSubtable.Subtable = kbts__ByteSwap16(*PreferredSubtable.Subtable);
               switch(*PreferredSubtable.Subtable)
               {
               case 0:
