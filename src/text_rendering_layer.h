@@ -31,8 +31,9 @@ void text_layer_draw(TextLayer* gui, sg_sampler sampler, int gui_width, int gui_
 
 #if !defined(RASTER_STB_TRUETYPE) && !defined(RASTER_FREETYPE_SINGLECHANNEL) && !defined(RASTER_FREETYPE_MULTICHANNEL)
 // #define RASTER_STB_TRUETYPE
-#define RASTER_FREETYPE_MULTICHANNEL
-// #define RASTER_FREETYPE_SINGLECHANNEL
+// TODO: fix blending in multichannel
+// #define RASTER_FREETYPE_MULTICHANNEL
+#define RASTER_FREETYPE_SINGLECHANNEL
 #endif
 #if defined(RASTER_FREETYPE_SINGLECHANNEL) || defined(RASTER_FREETYPE_MULTICHANNEL)
 #define RASTER_FREETYPE
@@ -671,10 +672,16 @@ void text_layer_draw(TextLayer* gui, sg_sampler sampler, int gui_width, int gui_
 
         sg_apply_bindings(&bind);
 
-        vs_text_uniforms_t uniforms = {
+        vs_text_uniforms_t vs_text_uniforms = {
             .size = {gui_width, gui_height},
         };
-        sg_apply_uniforms(UB_vs_text_uniforms, &SG_RANGE(uniforms));
+        sg_apply_uniforms(UB_vs_text_uniforms, &SG_RANGE(vs_text_uniforms));
+
+        fs_text_singlechannel_t fs_text_singlechannel = {
+            .u_colour = {1, 1, 1, 1},
+        };
+        sg_apply_uniforms(UB_fs_text_singlechannel, &SG_RANGE(fs_text_singlechannel));
+
         sg_draw(0, 6 * gui->text_buffer_len, 1);
     }
 

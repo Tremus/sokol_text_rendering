@@ -61,12 +61,17 @@ void main() {
 layout(binding=1) uniform texture2D text_tex;
 layout(binding=0) uniform sampler text_smp;
 
+layout(binding=1) uniform fs_text_singlechannel {
+    vec4 u_colour;
+};
+
+
 in vec2 texcoord;
-out vec4 frag_color;
+out vec4 frag_colour;
 
 void main() {
     float alpha = texture(sampler2D(text_tex, text_smp), texcoord).r;
-    frag_color = vec4(1, 1, 1, alpha);
+    frag_colour = vec4(u_colour.rgb, u_colour.a * alpha);
 }
 @end
 
@@ -75,10 +80,10 @@ layout(binding=1) uniform texture2D text_tex;
 layout(binding=0) uniform sampler text_smp;
 
 in vec2 texcoord;
-out vec4 frag_color;
+out vec4 frag_colour;
 
 void main() {
-    frag_color = texture(sampler2D(text_tex, text_smp), texcoord);
+    frag_colour = texture(sampler2D(text_tex, text_smp), texcoord);
 }
 @end
 
