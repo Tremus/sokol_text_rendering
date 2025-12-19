@@ -1,7 +1,6 @@
 #include "common.h"
 #include "plugin.h"
 
-#include <xhl/array.h>
 #include <xhl/debug.h>
 #include <xhl/files.h>
 #include <xhl/maths.h>
@@ -283,8 +282,10 @@ void pw_tick(void* _gui)
 
     // Begin frame
     {
+        sg_color col_black = {0, 0, 0, 1.0f};
+        // sg_color col_white = {1, 1, 1, 1};
         sg_pass_action pass_action = {
-            .colors[0] = {.load_action = SG_LOADACTION_CLEAR, .clear_value = {0, 0, 0, 1.0f}}};
+            .colors[0] = {.load_action = SG_LOADACTION_CLEAR, .clear_value = col_black}};
 
         sg_swapchain swapchain;
         memset(&swapchain, 0, sizeof(swapchain));

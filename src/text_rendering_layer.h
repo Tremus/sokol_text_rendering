@@ -25,6 +25,7 @@ void text_layer_draw(TextLayer* gui, sg_sampler sampler, int gui_width, int gui_
 #include <text.glsl.h>
 #include <xhl/alloc.h>
 #include <xhl/array.h>
+// #include <xhl/array2.h>
 #include <xhl/debug.h>
 #include <xhl/files.h>
 
@@ -224,8 +225,8 @@ int raster_glyph(TextLayer* gui, uint32_t glyph_index, float font_size)
             memset(&gui->current_atlas.ctx, 0, sizeof(gui->current_atlas.ctx));
             stbrp_init_target(
                 &gui->current_atlas.ctx,
-                ATLAS_WIDTH,
-                ATLAS_HEIGHT,
+                ATLAS_WIDTH - RECTPACK_PADDING,
+                ATLAS_HEIGHT - RECTPACK_PADDING,
                 gui->current_atlas.nodes,
                 xarr_len(gui->current_atlas.nodes));
 
@@ -248,8 +249,8 @@ int raster_glyph(TextLayer* gui, uint32_t glyph_index, float font_size)
             arect.header.font_size = font_size;
             arect.pen_offset_x     = glyph->bitmap_left / PLATFORM_BACKING_SCALE_FACTOR;
             arect.pen_offset_y     = glyph->bitmap_top / PLATFORM_BACKING_SCALE_FACTOR;
-            arect.x                = rect.x;
-            arect.y                = rect.y;
+            arect.x                = rect.x + RECTPACK_PADDING;
+            arect.y                = rect.y + RECTPACK_PADDING;
             arect.w                = width_pixels;
             arect.h                = bmp->rows;
             arect.img_view         = atlas->img_view;
@@ -263,7 +264,7 @@ int raster_glyph(TextLayer* gui, uint32_t glyph_index, float font_size)
             for (int y = 0; y < bmp->rows; y++)
             {
 #if defined(RASTER_FREETYPE_SINGLECHANNEL)
-                unsigned char* dst = gui->current_atlas.img_data + (rect.y + y) * ATLAS_ROW_STRIDE + rect.x;
+                unsigned char* dst = gui->current_atlas.img_data + (arect.y + y) * ATLAS_ROW_STRIDE + arect.x;
                 unsigned char* src = bmp->buffer + y * bmp->pitch;
 
                 unsigned char(*src_view)[512]  = (void*)src;
@@ -275,15 +276,15 @@ int raster_glyph(TextLayer* gui, uint32_t glyph_index, float font_size)
 
                 dst_view += 0;
 #else
-                unsigned char* dst = gui->current_atlas.img_data + (rect.y + y) * ATLAS_ROW_STRIDE + rect.x * 4;
+                unsigned char* dst = gui->current_atlas.img_data + (arect.y + y) * ATLAS_ROW_STRIDE + arect.x * PLATFORM_TEXTURE_CHANNELS;
                 unsigned char* src = bmp->buffer + y * bmp->pitch;
 
-                for (int x = 0; x < width_pixels; x++, dst += 4, src += 3)
+                for (int x = 0; x < width_pixels; x++, dst += PLATFORM_TEXTURE_CHANNELS, src += PLATFORM_FT_BITMAP_WIDTH)
                 {
                     dst[0] = src[0];
                     dst[1] = src[1];
                     dst[2] = src[2];
-                    dst[3] = 0xff;
+                    dst[3] = 0;
                 }
 #endif
             }
@@ -488,6 +489,7 @@ TextLayer* text_layer_new(const char* font_path)
 #endif
 
     sg_pipeline_desc pip_desc = {.shader = shd, .label = "img-pipeline"};
+
 #if defined(RASTER_FREETYPE_MULTICHANNEL)
     pip_desc.colors[0] = (sg_color_target_state){
         .write_mask = SG_COLORMASK_RGB,
@@ -508,6 +510,7 @@ TextLayer* text_layer_new(const char* font_path)
         }};
 
 #endif
+
     gui->text_pip      = sg_make_pipeline(&pip_desc);
     bool did_read_file = xfiles_read(font_path, &gui->fontdata, &gui->fontdata_size);
     xassert(did_read_file);
