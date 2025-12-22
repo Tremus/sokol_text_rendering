@@ -72,12 +72,13 @@ endif()
 
 set(FREETYPE_SRC
     # modules/freetype/src/base/ftver.rc.res
-    freetype_scu.c
+    src/libs/freetype_scu.c
     )
 
 set(FREETYPE_INCLUDE
     modules/freetype/include
     modules/freetype/src/base
+    src/libs
     )
 
 add_library(freetype STATIC ${FREETYPE_SRC})

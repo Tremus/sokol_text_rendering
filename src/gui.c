@@ -198,6 +198,7 @@ void* pw_create_gui(void* _plugin, void* _pw)
     });
 
 #if defined(_WIN32)
+    // const char* font_path = "C:\\Windows\\Fonts\\arial.ttf";
     // const char* font_path = "C:\\Windows\\Fonts\\arialbd.ttf";
     const char* font_path = "C:\\Windows\\Fonts\\seguisb.ttf";
     // const char* font_path = "C:\\Windows\\Fonts\\segoeui.ttf";
@@ -284,8 +285,7 @@ void pw_tick(void* _gui)
     {
         sg_color col_black = {0, 0, 0, 1.0f};
         // sg_color col_white = {1, 1, 1, 1};
-        sg_pass_action pass_action = {
-            .colors[0] = {.load_action = SG_LOADACTION_CLEAR, .clear_value = col_black}};
+        sg_pass_action pass_action = {.colors[0] = {.load_action = SG_LOADACTION_CLEAR, .clear_value = col_black}};
 
         sg_swapchain swapchain;
         memset(&swapchain, 0, sizeof(swapchain));
@@ -321,7 +321,8 @@ void pw_tick(void* _gui)
 
     // Move pen to centre of gui
     // pen_x += 10;             // padding
-    int pen_x = gui_width / 2;                      // Horizontal centre
+    // int pen_x = gui_width / 2;                      // Horizontal centre
+    int pen_x = 10;                                 // Horizontal centre
     int pen_y = (gui_height / 2) - (FONT_SIZE / 2); // Vertical centre
 
     text_layer_draw_text(gui->tl, MY_TEXT, NULL, pen_x, pen_y, FONT_SIZE);

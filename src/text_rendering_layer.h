@@ -92,12 +92,6 @@ enum
 };
 _Static_assert((ATLAS_WIDTH << ATLAS_UINT16_SHIFT) == (1 << 16), "");
 
-typedef struct
-{
-    float   x, y;
-    int16_t u, v;
-} vertex_t;
-
 // Used to identify a unique glyph.
 // TODO: support multiple fonts
 union atlas_rect_header
@@ -190,8 +184,9 @@ int raster_glyph(TextLayer* gui, uint32_t glyph_index, float font_size)
     xassert(gui->current_atlas.idx < xarr_len(gui->glyph_atlases));
     glyph_atlas* atlas = gui->glyph_atlases + gui->current_atlas.idx;
 
-    const float DPI = 96;
-    FT_Set_Char_Size(gui->ft_face, 0, font_size * 64 * PLATFORM_BACKING_SCALE_FACTOR, DPI, DPI);
+    // const float DPI = 96;
+    // FT_Set_Char_Size(gui->ft_face, 0, font_size * 64 * PLATFORM_BACKING_SCALE_FACTOR, DPI, DPI);
+    FT_Set_Pixel_Sizes(gui->ft_face, 0, font_size * PLATFORM_BACKING_SCALE_FACTOR);
 
     int err = FT_Load_Glyph(gui->ft_face, glyph_index, FT_LOAD_DEFAULT);
     xassert(!err);
@@ -277,10 +272,12 @@ int raster_glyph(TextLayer* gui, uint32_t glyph_index, float font_size)
 
                 dst_view += 0;
 #else
-                unsigned char* dst = gui->current_atlas.img_data + (arect.y + y) * ATLAS_ROW_STRIDE + arect.x * PLATFORM_TEXTURE_CHANNELS;
+                unsigned char* dst = gui->current_atlas.img_data + (arect.y + y) * ATLAS_ROW_STRIDE +
+                                     arect.x * PLATFORM_TEXTURE_CHANNELS;
                 unsigned char* src = bmp->buffer + y * bmp->pitch;
 
-                for (int x = 0; x < width_pixels; x++, dst += PLATFORM_TEXTURE_CHANNELS, src += PLATFORM_FT_BITMAP_WIDTH)
+                for (int x = 0; x < width_pixels;
+                     x++, dst += PLATFORM_TEXTURE_CHANNELS, src += PLATFORM_FT_BITMAP_WIDTH)
                 {
                     dst[0] = src[0];
                     dst[1] = src[1];
@@ -309,7 +306,7 @@ int raster_glyph(TextLayer* gui, uint32_t glyph_index, float font_size)
     int ix0 = 0, iy0 = 0, ix1 = 0, iy1 = 0;
     // TODO: figure out what I should be using here...
     // TODO: figure out how to get rasterizer to match the same height as the text shaper
-    float scale_pixel_height = stbtt_ScaleForPixelHeight(&gui->fontinfo, font_size * PLATFORM_BACKING_SCALE_FACTOR * 2);
+    float scale_pixel_height = stbtt_ScaleForPixelHeight(&gui->fontinfo, font_size * PLATFORM_BACKING_SCALE_FACTOR);
     // float scale_emtopixels = stbtt_ScaleForMappingEmToPixels(&gui->fontinfo, font_size *
     // PLATFORM_BACKING_SCALE_FACTOR);
     float scale = scale_pixel_height;
